@@ -4,7 +4,7 @@ from fastapi import WebSocket
 from app.models import (
     PatientSession, TriageCase, Prescription, Medication, RiskState, PrescriptionStatus, ChatMessage, Appointment, AppointmentType
 )
-
+#here is my change
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
