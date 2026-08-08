@@ -1,9 +1,9 @@
 import unittest
-from app.models import TriageCase, RiskState, PrescriptionStatus, Medication, Prescription
-from app.safety_engine import evaluate_safety_triage
-from app.rag_engine import RAGEngine
-from app.triage_engine import TriageEngine
-from app.translation import TranslationEngine
+from app.shared.models import TriageCase, RiskState, PrescriptionStatus, Medication, Prescription
+from app.patient_backend.safety_engine import evaluate_safety_triage
+from app.patient_backend.rag_engine import RAGEngine
+from app.patient_backend.triage_engine import TriageEngine
+from app.patient_backend.translation import TranslationEngine
 
 class TestBackendComponents(unittest.TestCase):
     def test_safety_urgent_chest_pain(self):

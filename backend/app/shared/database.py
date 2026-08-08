@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from fastapi import WebSocket
-from app.models import (
+from app.shared.models import (
     PatientSession, TriageCase, Prescription, Medication, RiskState, PrescriptionStatus, ChatMessage, Appointment, AppointmentType
 )
 class ConnectionManager:

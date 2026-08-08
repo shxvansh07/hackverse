@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from app.models import Medication, Prescription, PrescriptionStatus
+from app.shared.models import Medication, Prescription, PrescriptionStatus
 
 # Curated Medical Formulary & Clinical Guidelines (Hackathon Knowledge Base)
 CLINICAL_KNOWLEDGE_BASE = [

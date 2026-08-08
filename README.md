@@ -48,7 +48,7 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
                      │                                                 │
                      ▼                                                 ▼
          ┌─────────────────────────────────────────────────────────────┐
-         │              database.py — shared in-memory store            │
+         │           shared/database.py — shared in-memory store         │
          │   sessions · cases · prescriptions · appointments             │
          │              + ConnectionManager (WebSocket broadcast)        │
          └─────────────────────────────────────────────────────────────┘
@@ -58,7 +58,7 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
      (patient-language prescription view — never mutates clinical content)
 ```
 
-`main.py` is a thin app factory that just wires the two routers together — both share the *same* in-memory `db` and `ws_manager` singletons in `database.py`, which is exactly how a doctor's decision instantly reaches the patient's next poll and the doctor queue's WebSocket push.
+`main.py` is a thin app factory that just wires `patient_backend.router` and `doctor_backend.router` together — both import the *same* in-memory `db` and `ws_manager` singletons from `shared/database.py`, which is exactly how a doctor's decision instantly reaches the patient's next poll and the doctor queue's WebSocket push. That in-memory store has to stay a single process — it's why this is one backend app with two router folders, not two separate backend services.
 
 ## Tech stack (as actually used, not aspirational)
 
@@ -75,39 +75,43 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
 
 ## Repo layout & 4-way ownership
 
+Four folders, one for each part. `patient_backend/` and `doctor_backend/` use underscores, not hyphens — Python's `import` syntax doesn't allow hyphens in package names, so `patient-backend` isn't a valid importable folder name. The frontend route folders (`app/patient/`, `app/doctor/`) keep their existing names since they're also the live URL paths (`/patient`, `/doctor`) — renaming them would break every link and bookmark to the app.
+
 ```
 backend/
   app/
-    main.py            — thin app factory, wires both routers
-    routers/
-      patient.py        ← Patient Backend
-      doctor.py          ← Doctor Backend
-    models.py            (shared — Pydantic schemas both sides depend on)
-    database.py           (shared — in-memory store + WebSocket manager)
-    ai_service.py        ← Patient Backend  (LLM cascade)
-    triage_engine.py     ← Patient Backend  (structured extraction)
-    safety_engine.py     ← Patient Backend  (red-flag rules)
-    rag_engine.py        ← Patient Backend  (formulary/draft — also called from doctor.py)
-    translation.py       ← Patient Backend  (prescription language view)
-  tests/test_backend.py  (safety, RAG, translation unit tests — run with `python -m unittest`)
+    main.py                  — thin app factory: imports both routers, wires them onto one FastAPI app
+    shared/                  ← used by both backend parts, not owned by either
+      models.py               (Pydantic schemas — TriageCase, Prescription, etc.)
+      database.py              (in-memory store + WebSocket ConnectionManager)
+    patient_backend/         ← Patient Backend folder
+      router.py                (session, triage chat, prescription GET, appointment booking)
+      ai_service.py            (LLM cascade: Gemini → Groq → OpenAI → DeepSeek → NVIDIA → rules)
+      triage_engine.py         (structured field extraction)
+      safety_engine.py         (deterministic red-flag rules)
+      rag_engine.py            (formulary-grounded draft — doctor_backend also calls this)
+      translation.py           (prescription language view)
+    doctor_backend/          ← Doctor Backend folder
+      router.py                (auth, WebSocket, case queue, decisions)
+  tests/test_backend.py       (safety, RAG, translation unit tests — run with `python -m unittest`)
 
 frontend/
   src/app/
-    page.tsx              (landing — links to both portals)
-    patient/page.tsx     ← Patient Frontend  (chat + voice call + prescription view)
-    doctor/login/page.tsx ← Doctor Frontend
-    doctor/page.tsx       ← Doctor Frontend  (queue + case review + decisions)
-  src/lib/api.ts          (shared typed client both portals import)
+    page.tsx                   (landing — links to both portals)
+    patient/page.tsx          ← Patient Frontend  (chat + voice call + prescription view)
+    doctor/login/page.tsx     ← Doctor Frontend
+    doctor/page.tsx            ← Doctor Frontend  (queue + case review + decisions)
+  src/lib/api.ts               (shared typed client both portals import)
 ```
 
-| Part | Owns | Consumes from shared/other side |
+| Part | Folder | Consumes from `shared/` |
 |---|---|---|
-| **Patient Frontend** | `frontend/src/app/patient/page.tsx`, landing page | `lib/api.ts` |
-| **Patient Backend** | `routers/patient.py`, `ai_service.py`, `triage_engine.py`, `safety_engine.py`, `rag_engine.py`, `translation.py` | `models.py`, `database.py` |
-| **Doctor Frontend** | `frontend/src/app/doctor/page.tsx`, `frontend/src/app/doctor/login/page.tsx` | `lib/api.ts` |
-| **Doctor Backend** | `routers/doctor.py` (auth, queue, decisions, WebSocket) | `models.py`, `database.py`, `rag_engine.py` (lazy-draft fallback) |
+| **Patient Frontend** | `frontend/src/app/patient/` + landing page | `lib/api.ts` |
+| **Patient Backend** | `backend/app/patient_backend/` | `shared/models.py`, `shared/database.py` |
+| **Doctor Frontend** | `frontend/src/app/doctor/` | `lib/api.ts` |
+| **Doctor Backend** | `backend/app/doctor_backend/` | `shared/models.py`, `shared/database.py`, `patient_backend/rag_engine.py` (lazy-draft fallback when a doctor opens a case with no draft yet) |
 
-`models.py` and `database.py` are intentionally shared, not duplicated — both portals operate on the same `TriageCase`/`Prescription` records and the same in-memory store. Splitting those would mean two copies of the same data going out of sync.
+`shared/models.py` and `shared/database.py` are intentionally shared, not duplicated per folder — both backend parts operate on the same `TriageCase`/`Prescription` records and the same in-memory store (and the same process, since the WebSocket broadcast and in-memory DB only work as one running server). Duplicating them would mean two copies of the same data silently going out of sync. Each of the 4 folders above is otherwise fully independent — one person's PR only ever touches their own folder, so there's no file-level collision between the 4 of you.
 
 ## Setup & run
 

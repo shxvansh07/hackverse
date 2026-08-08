@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.database import db, ws_manager
-from app.models import (
+from app.shared.database import db, ws_manager
+from app.shared.models import (
     Appointment,
     AppointmentType,
     BookAppointmentRequest,
@@ -24,9 +24,9 @@ from app.models import (
     TriageMessageRequest,
     TriageMessageResponse,
 )
-from app.rag_engine import RAGEngine
-from app.translation import TranslationEngine
-from app.triage_engine import TriageEngine
+from app.patient_backend.rag_engine import RAGEngine
+from app.patient_backend.translation import TranslationEngine
+from app.patient_backend.triage_engine import TriageEngine
 
 router = APIRouter()
 

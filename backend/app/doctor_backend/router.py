@@ -13,8 +13,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.database import db, ws_manager
-from app.models import (
+from app.shared.database import db, ws_manager
+from app.shared.models import (
     Appointment,
     AppointmentType,
     DecisionType,
@@ -25,7 +25,7 @@ from app.models import (
     ReferralInfo,
     TriageCase,
 )
-from app.rag_engine import RAGEngine
+from app.patient_backend.rag_engine import RAGEngine
 
 router = APIRouter()
 

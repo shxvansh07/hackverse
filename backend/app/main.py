@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import doctor, patient
+from app.doctor_backend import router as doctor_router
+from app.patient_backend import router as patient_router
 
 app = FastAPI(
     title="Clinical Assistant API",
@@ -23,5 +24,5 @@ def read_root():
     return {"status": "online", "version": "2.1.0"}
 
 
-app.include_router(patient.router)
-app.include_router(doctor.router)
+app.include_router(patient_router.router)
+app.include_router(doctor_router.router)

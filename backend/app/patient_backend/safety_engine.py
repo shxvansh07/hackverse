@@ -1,5 +1,5 @@
 from typing import List, Tuple
-from app.models import RiskState
+from app.shared.models import RiskState
 
 # Red flag keyword mappings (English & Hindi/Hinglish terms)
 RED_FLAG_PATTERNS = {

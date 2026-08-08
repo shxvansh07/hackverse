@@ -1,10 +1,10 @@
 import re
 from typing import Dict, Any, List, Tuple
 from datetime import datetime, timedelta
-from app.models import TriageCase, ChatMessage, RiskState, Appointment, AppointmentType
-from app.safety_engine import evaluate_safety_triage
-from app.ai_service import AIService
-from app.database import db
+from app.shared.models import TriageCase, ChatMessage, RiskState, Appointment, AppointmentType
+from app.patient_backend.safety_engine import evaluate_safety_triage
+from app.patient_backend.ai_service import AIService
+from app.shared.database import db
 
 # Negative confirmation words (Hindi & English)
 NEGATIVE_WORDS = [
