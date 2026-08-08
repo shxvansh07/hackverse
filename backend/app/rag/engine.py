@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
+from app.patient_backend.ml_predictor import predict_condition
 from app.rag.vector_store import SearchHit, VectorStore
 from app.shared import knowledge
 from app.shared.models import Medication, Prescription, PrescriptionStatus
@@ -163,6 +164,7 @@ class ClinicalRAGEngine:
         icd10 = ""
         condition = ""
         matched_entries: List[Dict[str, Any]] = []
+        ml_hypothesis: Optional[Dict[str, Any]] = None
 
         if retrieval["protocols"]:
             top = retrieval["protocols"][0]
@@ -184,13 +186,31 @@ class ClinicalRAGEngine:
             if protocol.get("instructions"):
                 instructions_parts.append(protocol["instructions"])
         else:
-            # No protocol matched. Rather than let a model improvise, emit a
-            # deliberately empty draft; the doctor sees that retrieval found
-            # nothing and prescribes from scratch.
+            # No protocol matched in the 6-condition curated formulary. Rather
+            # than let a model improvise a medication, the draft stays empty —
+            # but a broader classifier (trained on a real 41-condition public
+            # dataset, see patient_backend/ml_predictor.py) may still offer the
+            # doctor a diagnostic hypothesis. This NEVER adds a medication:
+            # only a condition name, confidence, description and precautions,
+            # surfaced as text for the doctor to read, exactly like the
+            # rationale prose already is.
             instructions_parts.append(
                 "No curated protocol matched this presentation. "
                 "No medication has been drafted; clinician assessment required."
             )
+            ml_hypothesis = predict_condition(
+                symptoms=list(symptoms),
+                associated_symptoms=list(associated_symptoms),
+                free_text=summary,
+            )
+            if ml_hypothesis:
+                instructions_parts.append(
+                    f"For reference only, a statistical classifier trained on a public "
+                    f"symptom dataset suggests this presentation may be consistent with "
+                    f"{ml_hypothesis['condition']} ({ml_hypothesis['confidence'] * 100:.0f}% "
+                    f"model confidence). This is not a diagnosis and has not informed any "
+                    f"medication choice — clinician assessment required."
+                )
 
         prescription = Prescription(
             case_id=case_id,
@@ -213,6 +233,7 @@ class ClinicalRAGEngine:
             ],
             "guidance": retrieval["guidance"],
             "matched_entries": matched_entries,
+            "ml_hypothesis": ml_hypothesis,
         }
         return prescription, grounding
 

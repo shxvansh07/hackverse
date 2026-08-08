@@ -1,5 +1,5 @@
 """ML condition classifier — trained on a real public dataset, not fabricated
-data. PERSON 2 owns this file.
+data.
 
 Dataset: "Disease Prediction Using Machine Learning" (Kaggle-origin, mirrored at
 github.com/sohamvsonar/Disease-Prediction-and-Medical-Recommendation-System)
@@ -8,7 +8,8 @@ Files live in patient_backend/data/. It's a clean, balanced teaching dataset
 (not real de-identified EHR data), so don't be surprised the classifier looks
 very confident — that reflects how tidy the data is, not real-world
 diagnostic accuracy. Good enough to broaden diagnostic *reasoning breadth*
-for a hackathon demo; not a clinical-grade diagnostic model.
+beyond the 6-condition curated formulary in knowledge/formulary.json; not a
+clinical-grade diagnostic model and not a source of medication truth.
 
 DELIBERATELY NOT USED: this mirror's medications.csv/diets.csv files. Cross-
 checking them against description.csv/precautions_df.csv (which line up
@@ -18,26 +19,36 @@ varicose-vein treatments (compression stockings, sclerotherapy) and
 radioactive iodine). Training.csv, description.csv, and precautions_df.csv
 were spot-checked and are correctly aligned, so only those are used here.
 
-SAFETY BOUNDARY: predicting a *condition label* from symptoms is a
-legitimate, well-scoped use of a real dataset. Predicting a *medication
-dosage* is not something this (or any) public symptom dataset can responsibly
-support — see rag_engine.py for how a predicted condition here still only
-becomes a concrete medication when it matches the small, manually-verified
-DOSAGE_REFERENCE table; otherwise the draft explicitly says "doctor to
-determine treatment" rather than inventing a drug/dose.
+SAFETY BOUNDARY, unchanged by where this is called from: predicting a
+*condition label* from symptoms is a legitimate, well-scoped use of a real
+dataset. Predicting a *medication dosage* is not something this (or any)
+public symptom dataset can responsibly support. app.rag.engine only ever
+surfaces this module's output as diagnostic-hypothesis text for the doctor's
+rationale (condition name, confidence, description, precautions) — it is
+never permitted to add, substitute, or dose a medication. Every medication in
+a draft still comes verbatim from knowledge/formulary.json, exactly as
+app.safety.guards and the rest of the RAG layer already enforce.
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 
+from app.safety.engine import normalise
+
 DATA_DIR = Path(__file__).parent / "data"
 
 _training = pd.read_csv(DATA_DIR / "Training.csv")
 _training.columns = [c.strip() for c in _training.columns]
 SYMPTOM_COLUMNS = [c for c in _training.columns if c != "prognosis"]
-_COL_INDEX = {name: i for i, name in enumerate(SYMPTOM_COLUMNS)}
+
+#: Dataset column names double as the matching vocabulary ("high_fever" ->
+#: "high fever") — richer and less brittle than hand-maintaining a separate
+#: symptom-label map, and it stays in sync with the model by construction.
+_COLUMN_PHRASES = [col.replace("_", " ").strip() for col in SYMPTOM_COLUMNS]
 
 _X = _training[SYMPTOM_COLUMNS].values
 _y = _training["prognosis"].values
@@ -64,51 +75,42 @@ PRECAUTIONS = {
     for _, row in _precautions_df.iterrows()
 }
 
-# Our conversational symptom labels (triage_engine.py's symptom_keywords) ->
-# this dataset's column names. Extend both together if you add a new
-# conversational symptom category.
-SYMPTOM_LABEL_MAP: dict[str, list[str]] = {
-    "fever": ["high_fever", "mild_fever"],
-    "body ache": ["muscle_pain", "joint_pain", "back_pain"],
-    "cough": ["cough"],
-    "cold/runny nose": ["runny_nose", "continuous_sneezing", "congestion", "sinus_pressure"],
-    "sore throat": ["throat_irritation", "patches_in_throat"],
-    "headache": ["headache"],
-    "acidity/heartburn": ["acidity", "indigestion", "stomach_pain"],
-    "stomach ache": ["stomach_pain", "abdominal_pain", "belly_pain"],
-    "diarrhea": ["diarrhoea"],
-    "vomiting/nausea": ["vomiting", "nausea"],
-    "dizziness": ["dizziness", "spinning_movements", "loss_of_balance", "unsteadiness"],
-    "chest pain": ["chest_pain"],
-    "breathing difficulty": ["breathlessness"],
-    "feeling unwell": ["fatigue", "malaise", "lethargy"],
-}
-
 # A handful of very generic symptom combinations (e.g. "fever" + "body ache"
-# alone) are shared by dozens of diseases in this dataset and Naive Bayes can
-# still land on a confident-looking but implausible top guess for them (we
-# saw "fever + body ache" alone predict "AIDS" at 96% during testing — an
-# artifact of how few positive features that class has, not a real signal).
-# Require at least this many mapped symptom columns before trusting the
-# prediction at all, on top of the confidence floor.
-MIN_MAPPED_COLUMNS = 3
+# alone) are shared by dozens of diseases in this dataset, and a small model
+# can still land on a confident-looking but implausible top guess for them.
+# Require at least this many matched columns before trusting the prediction
+# at all, on top of the confidence floor.
+MIN_MATCHED_COLUMNS = 3
 
 
-def predict_condition(symptom_labels: list[str], min_confidence: float = 0.15) -> dict | None:
-    """Maps conversational symptom labels onto the dataset's 132-column
-    feature space and returns the top predicted condition. Returns None if
-    too few labels map to known columns, or confidence is too low to be
-    worth showing (41 classes => 1/41 ≈ 2.4% is chance level)."""
+def predict_condition(
+    symptoms: list[str],
+    associated_symptoms: list[str] | None = None,
+    free_text: str = "",
+    min_confidence: float = 0.15,
+) -> dict | None:
+    """Maps free-text clinical terms onto the dataset's 132-column feature
+    space and returns the top predicted condition, or None if too few terms
+    match a known column, or confidence is too low to be worth showing (41
+    classes => 1/41 ≈ 2.4% is chance level).
+
+    Matching is deliberately a simple substring check against normalised
+    text, same technique app.safety.engine uses for red flags — this is a
+    soft diagnostic hint, not a safety gate, so it doesn't need that
+    function's proximity-matching rigor.
+    """
+    haystack = normalise(" ".join([*symptoms, *(associated_symptoms or []), free_text]))
+    if not haystack:
+        return None
+
     vector = [0] * len(SYMPTOM_COLUMNS)
-    mapped_columns = 0
-    for label in symptom_labels:
-        for col in SYMPTOM_LABEL_MAP.get(label, []):
-            idx = _COL_INDEX.get(col)
-            if idx is not None and vector[idx] == 0:
-                vector[idx] = 1
-                mapped_columns += 1
+    matched = 0
+    for i, phrase in enumerate(_COLUMN_PHRASES):
+        if phrase and phrase in haystack:
+            vector[i] = 1
+            matched += 1
 
-    if mapped_columns < MIN_MAPPED_COLUMNS:
+    if matched < MIN_MATCHED_COLUMNS:
         return None
 
     proba = _model.predict_proba([vector])[0]
