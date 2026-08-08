@@ -25,6 +25,7 @@ export default function PatientPortal() {
   const [loading, setLoading] = useState(false);
   const [triageStatus, setTriageStatus] = useState<'LOW_RISK' | 'UNCERTAIN' | 'URGENT' | 'COLLECTING'>('COLLECTING');
   const [isComplete, setIsComplete] = useState(false);
+  const [recommendAppointment, setRecommendAppointment] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
   const [prescription, setPrescription] = useState<Prescription | null>(null);
   const [rxLang, setRxLang] = useState<string>('hi');
@@ -33,7 +34,6 @@ export default function PatientPortal() {
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
-  const [specialistBookingLoading, setSpecialistBookingLoading] = useState(false);
   const [emergencyBookingLoading, setEmergencyBookingLoading] = useState(false);
 
   // VAD & Voice Call Engine State & REFS
@@ -107,6 +107,7 @@ export default function PatientPortal() {
       ]);
       setTriageStatus('COLLECTING');
       setIsComplete(false);
+      setRecommendAppointment(false);
       setPrescription(null);
       setAppointment(null);
       setReferral(null);
@@ -364,6 +365,7 @@ export default function PatientPortal() {
     try {
       const res = await api.sendMessage(session.session_id, textToSend);
       setTriageStatus(res.triage_status);
+      setRecommendAppointment(res.recommend_appointment);
       if (res.case_id) setCaseId(res.case_id);
 
       if (res.auto_booked_appointment) {
@@ -442,11 +444,13 @@ export default function PatientPortal() {
     }
   };
 
+  // Books with the recommended specialty when we have one (SEVERE/URGENT
+  // paths), otherwise a plain optional consult (post-approval follow-up).
   const handleBookOptionalAppointment = async () => {
     if (!caseId) return;
     setBookingLoading(true);
     try {
-      const apt = await api.bookAppointment(caseId);
+      const apt = await api.bookAppointment(caseId, undefined, undefined, recommendedSpecialty || undefined);
       setAppointment(apt);
     } catch (err) {
       console.error('Booking error:', err);
@@ -465,19 +469,6 @@ export default function PatientPortal() {
       console.error('Emergency booking error:', err);
     } finally {
       setEmergencyBookingLoading(false);
-    }
-  };
-
-  const handleBookSpecialistAppointment = async () => {
-    if (!caseId || !recommendedSpecialty) return;
-    setSpecialistBookingLoading(true);
-    try {
-      const apt = await api.bookAppointment(caseId, undefined, undefined, recommendedSpecialty);
-      setAppointment(apt);
-    } catch (err) {
-      console.error('Specialist booking error:', err);
-    } finally {
-      setSpecialistBookingLoading(false);
     }
   };
 
@@ -620,33 +611,41 @@ export default function PatientPortal() {
           </div>
         )}
 
-        {/* UNCERTAIN — IN-PERSON SPECIALIST EVALUATION PROMPT */}
-        {triageStatus === 'UNCERTAIN' && (
+        {/* SEVERE (self-reported, no red-flag match) — recommend an in-person
+            appointment directly, no prescription drafted. Note: UNCERTAIN
+            triage_status alone does NOT show this card — it resolves to
+            MODERATE severity and continues the normal draft-and-review flow;
+            only an explicit self-reported "severe" (or a true URGENT red
+            flag, shown in its own banner above) lands here. */}
+        {recommendAppointment && triageStatus !== 'URGENT' && (
           <div className="bg-amber-50 border-2 border-amber-500 p-5 rounded-lg text-black space-y-3">
             <h3 className="text-base font-bold uppercase tracking-wider text-amber-700">
-              In-Person Specialist Evaluation Recommended
+              In-Person Appointment Recommended
             </h3>
             <p className="text-xs text-amber-900 leading-relaxed font-medium">
-              Your symptoms need an in-person evaluation for an accurate assessment.
+              Based on the severity you described, we&apos;re not drafting a home prescription for this.
+              Please book a doctor appointment so you can be examined directly.
               {recommendedSpecialty && ` Recommended specialist: ${recommendedSpecialty}.`}
             </p>
 
-            {!appointment ? (
-              <button
-                disabled={specialistBookingLoading || !recommendedSpecialty}
-                onClick={handleBookSpecialistAppointment}
-                className="px-4 py-2 bg-black text-white font-bold rounded text-xs hover:bg-neutral-800 disabled:opacity-50"
-              >
-                {specialistBookingLoading ? 'Booking...' : 'Book In-Person Appointment'}
-              </button>
-            ) : (
-              <div className="bg-white p-3 rounded border border-amber-300 text-xs font-mono space-y-1">
-                <div className="font-bold text-amber-700">[IN-PERSON APPOINTMENT BOOKED]</div>
-                <div>Time Slot: {appointment.slot_time}</div>
-                <div>Location: {appointment.clinic_location}</div>
-                <div>Ref ID: {appointment.appointment_id}</div>
-                {appointment.specialty && <div>Specialist: {appointment.specialty}</div>}
+            {appointment ? (
+              <div className="bg-white p-3.5 rounded border-2 border-neutral-800 text-xs font-mono space-y-1">
+                <div className="font-bold text-black text-sm border-b border-neutral-200 pb-1">
+                  📅 APPOINTMENT SCHEDULED
+                </div>
+                <div><strong>Slot Time:</strong> {appointment.slot_time}</div>
+                <div><strong>Location:</strong> {appointment.clinic_location}</div>
+                <div><strong>Ref ID:</strong> {appointment.appointment_id}</div>
+                {appointment.specialty && <div><strong>Specialist:</strong> {appointment.specialty}</div>}
               </div>
+            ) : (
+              <button
+                disabled={bookingLoading}
+                onClick={handleBookOptionalAppointment}
+                className="px-4 py-2 bg-amber-600 text-white font-bold rounded text-xs hover:bg-amber-700 disabled:opacity-50"
+              >
+                {bookingLoading ? 'Booking...' : 'Book Doctor Appointment Now'}
+              </button>
             )}
           </div>
         )}
@@ -773,7 +772,7 @@ export default function PatientPortal() {
           </div>
 
           {/* INPUT FORM */}
-          {triageStatus !== 'URGENT' && triageStatus !== 'UNCERTAIN' && (
+          {triageStatus !== 'URGENT' && !recommendAppointment && (
             <form onSubmit={handleFormSubmit} className="mt-3 flex items-center space-x-2">
               <input
                 type="text"

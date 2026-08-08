@@ -9,6 +9,16 @@ class RiskState(str, Enum):
     UNCERTAIN = "UNCERTAIN"
     URGENT = "URGENT"
 
+class SeverityLevel(str, Enum):
+    """Deterministic severity tier — see safety_engine.classify_severity().
+    Distinct from RiskState: RiskState is the red-flag/escalation routing
+    decision, SeverityLevel is what drives prescription-vs-appointment
+    branching (MILD/MODERATE -> draft + doctor review, SEVERE -> skip
+    drafting, recommend an in-person appointment directly)."""
+    MILD = "MILD"
+    MODERATE = "MODERATE"
+    SEVERE = "SEVERE"
+
 class DecisionType(str, Enum):
     APPROVE = "APPROVE"
     MODIFY = "MODIFY"
@@ -92,6 +102,7 @@ class TriageCase(BaseModel):
     associated_symptoms: List[str] = []
     duration: str = ""
     severity: str = "Mild"
+    severity_level: SeverityLevel = SeverityLevel.MILD
     medical_history: List[str] = []
     medications: List[str] = []
     allergies: List[str] = []
@@ -138,9 +149,11 @@ class TriageMessageResponse(BaseModel):
     language: str
     is_complete: bool
     triage_status: RiskState
+    severity_level: SeverityLevel
     missing_information: List[str]
     case_id: Optional[str] = None
     auto_booked_appointment: Optional[Appointment] = None
+    recommend_appointment: bool = False
     recommended_specialty: Optional[str] = None
 
 class DoctorDecisionRequest(BaseModel):

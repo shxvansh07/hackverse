@@ -1,7 +1,7 @@
 import re
 from typing import Dict, Any, List, Tuple
-from app.shared.models import TriageCase, ChatMessage, RiskState
-from app.patient_backend.safety_engine import evaluate_safety_triage, recommend_specialty
+from app.shared.models import TriageCase, ChatMessage, RiskState, SeverityLevel
+from app.patient_backend.safety_engine import evaluate_safety_triage, classify_severity, recommend_specialty
 from app.patient_backend.ai_service import AIService
 from app.shared.database import db
 
@@ -105,10 +105,20 @@ class TriageEngine:
         current_case: TriageCase,
         patient_text: str,
         lang: str = "en"
-    ) -> Tuple[TriageCase, str, bool, Any]:
+    ) -> Tuple[TriageCase, str, bool, Any, bool]:
         """
         Processes message naturally using Groq LLM without repeating questions.
         If patient says 'no' / 'nahi' / 'nahin', intake COMPLETES IMMEDIATELY.
+
+        Returns (case, ai_reply, is_complete, auto_booked_appointment,
+        recommend_appointment). auto_booked_appointment is currently always
+        None — nothing is ever booked automatically, including true red-flag
+        URGENT emergencies, which now require the patient's explicit final
+        confirmation via the dedicated URGENT alert (see triage_status ===
+        'URGENT' handling in patient/page.tsx) rather than this flag.
+        recommend_appointment is set True only for the SEVERE-by-self-report
+        path below, to drive the separate amber "book an appointment" prompt
+        for non-red-flag severe cases.
         """
         sess = db.sessions.get(current_case.session_id)
         current_case.transcript.append(ChatMessage(sender="patient", text=patient_text))
@@ -123,10 +133,16 @@ class TriageEngine:
         )
         current_case.triage_status = risk_state
         current_case.red_flags = red_flags
+        current_case.severity_level = classify_severity(
+            risk_state=risk_state,
+            self_reported_severity=current_case.severity,
+            symptoms=current_case.symptoms,
+            associated_symptoms=current_case.associated_symptoms,
+        )
 
-        # 1. Urgent Red Flag Handling — do NOT auto-book. Warn immediately and
-        # ask the patient to give a final confirmation before an emergency
-        # appointment is reserved.
+        # 1. Urgent Red Flag Handling — deterministic safety net, always SEVERE.
+        # Do NOT auto-book. Warn immediately and ask the patient to give a
+        # final confirmation before an emergency appointment is reserved.
         if risk_state == RiskState.URGENT:
             current_case.recommended_specialty = recommend_specialty(red_flags)
 
@@ -144,25 +160,28 @@ class TriageEngine:
 
             current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
             current_case.summary_en = cls.build_english_summary(current_case)
-            return current_case, ai_reply, True, None
+            return current_case, ai_reply, True, None, False
 
-        # 2. Uncertain / Ambiguous Cases: stop the conversation and point the
-        # patient at an in-person specialist instead of auto-booking or
-        # continuing to chat indefinitely.
-        if risk_state == RiskState.UNCERTAIN:
+        # 2. SEVERE by self-report only (no red-flag phrase matched, but the
+        # patient described their own symptoms as severe). Skip prescription
+        # drafting and recommend an in-person appointment directly — but
+        # don't auto-book, since this didn't trip the specific red-flag list.
+        # MODERATE (which UNCERTAIN risk states fall into, per
+        # classify_severity) deliberately falls through instead of stopping
+        # here — per spec, moderate still gets a draft + doctor review, just
+        # with a doctor-side precaution hint (see doctor/page.tsx).
+        if current_case.severity_level == SeverityLevel.SEVERE:
             current_case.recommended_specialty = recommend_specialty(red_flags)
-
             ai_reply = (
-                "आपके बताए लक्षणों को सही आकलन के लिए व्यक्तिगत जांच की आवश्यकता है। "
-                f"कृपया {current_case.recommended_specialty} विशेषज्ञ के साथ व्यक्तिगत अपॉइंटमेंट बुक करें।"
+                "आपने जो लक्षण गंभीर बताए हैं, उनके लिए हम प्रिस्क्रिप्शन ड्राफ्ट नहीं भेज रहे — "
+                f"कृपया {current_case.recommended_specialty} विशेषज्ञ के साथ सीधे मिलने के लिए अपॉइंटमेंट बुक करें ताकि आपकी सीधे जांच हो सके।"
                 if lang == "hi" else
-                "Your symptoms need an in-person evaluation for an accurate assessment. "
-                f"Please book an in-person appointment with a {current_case.recommended_specialty} specialist."
+                "Because you've described this as severe, we're not drafting a home prescription for it — "
+                f"please book an in-person appointment with a {current_case.recommended_specialty} specialist so you can be examined properly."
             )
-
             current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
             current_case.summary_en = cls.build_english_summary(current_case)
-            return current_case, ai_reply, True, None
+            return current_case, ai_reply, True, None, True
 
         # 3. IMMEDIATE COMPLETION CHECK (If patient says 'nahi' / 'no' at ANY step after turn 1)
         if len(current_case.transcript) >= 2 and cls.is_negative_confirmation(patient_text):
@@ -173,7 +192,7 @@ class TriageEngine:
             )
             current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
             current_case.summary_en = cls.build_english_summary(current_case)
-            return current_case, ai_reply, True, None
+            return current_case, ai_reply, True, None, False
 
         # 4. Dynamic Natural Conversation using LLM (Groq Llama-3.3-70b)
         previous_ai_texts = [m.text for m in current_case.transcript if m.sender == "ai"]
@@ -197,7 +216,7 @@ class TriageEngine:
 
         current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
         current_case.summary_en = cls.build_english_summary(current_case)
-        return current_case, ai_reply, False, None
+        return current_case, ai_reply, False, None, False
 
     @staticmethod
     def build_english_summary(case: TriageCase) -> str:
@@ -209,6 +228,6 @@ class TriageEngine:
         red_flags_str = ", ".join(case.red_flags) if case.red_flags else "None"
 
         return (
-            f"Patient presents with {symptoms_str} (Severity: {severity_str}) lasting for {duration_str}. "
+            f"Patient presents with {symptoms_str} (Severity: {severity_str}, Severity tier: {case.severity_level.value}) lasting for {duration_str}. "
             f"Medical History: {history_str}. Allergies: {allergies_str}. Red Flags: {red_flags_str}."
         )
