@@ -21,6 +21,7 @@ web_modules/
 out/
 build/
 dist/
+*.tsbuildinfo
 
 # Python virtual environment & cache
 __pycache__/
