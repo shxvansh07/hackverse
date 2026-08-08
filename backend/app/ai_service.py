@@ -43,7 +43,30 @@ class AIService:
             f"4. Respond natively in the language corresponding to language code '{lang}' (e.g. Hindi, Kannada, Tamil, Telugu, English, etc.)."
         )
 
-        # 1. Google Gemini API
+        # 1. Groq API (High Speed LPU Llama-3.3 70B)
+        if GROQ_API_KEY:
+            try:
+                messages = [{"role": "system", "content": system_prompt}]
+                for h in history[-6:]:
+                    messages.append({
+                        "role": "user" if h.get("sender") == "patient" else "assistant",
+                        "content": h.get("text", "")
+                    })
+                messages.append({"role": "user", "content": patient_message})
+
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+                payload = {"model": GROQ_MODEL, "messages": messages, "temperature": 0.7, "max_tokens": 150}
+                with httpx.Client(timeout=8.0) as client:
+                    resp = client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        reply = resp.json()["choices"][0]["message"]["content"].strip()
+                        if reply and reply not in previous_ai_texts:
+                            return reply
+            except Exception as e:
+                print(f"Groq API Exception: {e}")
+
+        # 2. Google Gemini API
         if GEMINI_API_KEY:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -67,29 +90,6 @@ class AIService:
                             return reply
             except Exception as e:
                 print(f"Gemini API Exception: {e}")
-
-        # 2. Groq API
-        if GROQ_API_KEY:
-            try:
-                messages = [{"role": "system", "content": system_prompt}]
-                for h in history[-6:]:
-                    messages.append({
-                        "role": "user" if h.get("sender") == "patient" else "assistant",
-                        "content": h.get("text", "")
-                    })
-                messages.append({"role": "user", "content": patient_message})
-
-                url = "https://api.groq.com/openai/v1/chat/completions"
-                headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-                payload = {"model": GROQ_MODEL, "messages": messages, "temperature": 0.7, "max_tokens": 150}
-                with httpx.Client(timeout=8.0) as client:
-                    resp = client.post(url, headers=headers, json=payload)
-                    if resp.status_code == 200:
-                        reply = resp.json()["choices"][0]["message"]["content"].strip()
-                        if reply and reply not in previous_ai_texts:
-                            return reply
-            except Exception as e:
-                print(f"Groq API Exception: {e}")
 
         # 3. OpenAI API
         if OPENAI_API_KEY:
