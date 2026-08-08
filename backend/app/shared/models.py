@@ -9,6 +9,16 @@ class RiskState(str, Enum):
     UNCERTAIN = "UNCERTAIN"
     URGENT = "URGENT"
 
+class SeverityLevel(str, Enum):
+    """Deterministic severity tier — see safety_engine.classify_severity().
+    Distinct from RiskState: RiskState is the red-flag/escalation routing
+    decision, SeverityLevel is what drives prescription-vs-appointment
+    branching (MILD/MODERATE -> draft + doctor review, SEVERE -> skip
+    drafting, recommend an in-person appointment directly)."""
+    MILD = "MILD"
+    MODERATE = "MODERATE"
+    SEVERE = "SEVERE"
+
 class DecisionType(str, Enum):
     APPROVE = "APPROVE"
     MODIFY = "MODIFY"
@@ -28,6 +38,7 @@ class AppointmentType(str, Enum):
     OPTIONAL_CONSULT = "OPTIONAL_CONSULT"
     URGENT_EMERGENCY = "URGENT_EMERGENCY"
     DOCTOR_SCHEDULED_OFFLINE = "DOCTOR_SCHEDULED_OFFLINE"
+    SPECIALIST_CONSULT = "SPECIALIST_CONSULT"
 
 class Medication(BaseModel):
     name: str = Field(..., description="Medication generic or trade name")
@@ -80,6 +91,7 @@ class Appointment(BaseModel):
     clinic_location: str = "Main Hospital Clinic, Room 102"
     status: str = "CONFIRMED"
     notes: str = ""
+    specialty: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 class TriageCase(BaseModel):
@@ -96,6 +108,7 @@ class TriageCase(BaseModel):
     red_flags: List[str] = Field(default_factory=list)
     missing_information: List[str] = Field(default_factory=list)
     triage_status: RiskState = RiskState.LOW_RISK
+    recommended_specialty: Optional[str] = None
     review_status: str = "PENDING"
     summary_en: str = ""
     transcript: List[ChatMessage] = Field(default_factory=list)
@@ -119,6 +132,7 @@ class BookAppointmentRequest(BaseModel):
     case_id: str
     slot_time: Optional[str] = None
     clinic_location: Optional[str] = None
+    specialty: Optional[str] = None
 
 class CreateSessionRequest(BaseModel):
     preferred_language: str = "en"
@@ -134,9 +148,12 @@ class TriageMessageResponse(BaseModel):
     language: str
     is_complete: bool
     triage_status: RiskState
+    severity_level: SeverityLevel
     missing_information: List[str]
     case_id: Optional[str] = None
     auto_booked_appointment: Optional[Appointment] = None
+    recommend_appointment: bool = False
+    recommended_specialty: Optional[str] = None
 
 class DoctorDecisionRequest(BaseModel):
     decision: DecisionType

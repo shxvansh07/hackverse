@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from app.models import Prescription, Medication
+from app.shared.models import Prescription, Medication
 
 FREQUENCY_MAP = {
     "hi": {

@@ -294,6 +294,14 @@ class RAGEngine:
                 ]
                 instructions_list.append("Drink plenty of fluids, rest, and follow up with a doctor if symptoms worsen.")
 
+        # If the curated formulary DID match, still surface the ML hypothesis
+        # as extra context when it points at something different worth a
+        # doctor's attention — never overrides the verified medication choice.
+        if matches and ml_result and ml_result["condition"].lower() not in matches[0]["condition"].lower():
+            instructions_list.append(
+                f"AI also flags possible: {ml_result['condition']} ({ml_result['confidence']*100:.0f}% model confidence) — for doctor reference."
+            )
+
         return Prescription(
             case_id=case_id,
             status=PrescriptionStatus.DRAFT,

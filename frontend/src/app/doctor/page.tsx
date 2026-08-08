@@ -3,7 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { api, TriageCase, Prescription, Medication, Appointment, ReferralInfo } from '@/lib/api';
+import { api, TriageCase, Prescription, Medication, Appointment, ReferralInfo, SeverityLevel } from '@/lib/api';
+
+const SEVERITY_BADGE: Record<SeverityLevel, string> = {
+  MILD: 'bg-green-100 text-green-800',
+  MODERATE: 'bg-amber-100 text-amber-800',
+  SEVERE: 'bg-red-100 text-red-800',
+};
 
 export default function DoctorDashboard() {
   const router = useRouter();
@@ -433,6 +439,12 @@ export default function DoctorDashboard() {
               {/* Option B: Schedule In-Person Offline Appointment */}
               <div className="bg-neutral-50 p-3 rounded border border-neutral-300 space-y-2">
                 <div className="font-bold text-black uppercase text-[11px]">Option 2: Schedule In-Person Appointment</div>
+                {activeCase.severity_level === 'MODERATE' && (
+                  <div className="text-amber-700 bg-amber-50 border border-amber-300 rounded p-1.5 text-[10px] font-medium">
+                    ⚠ Moderate severity — this can progress to severe. Consider scheduling an in-person
+                    appointment as a precaution, even alongside approving the draft.
+                  </div>
+                )}
                 <input
                   type="text"
                   value={offlineTime}
