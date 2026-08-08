@@ -1,6 +1,6 @@
 import unittest
-from app.shared.models import TriageCase, RiskState, PrescriptionStatus, Medication, Prescription
-from app.patient_backend.safety_engine import evaluate_safety_triage
+from app.shared.models import TriageCase, RiskState, SeverityLevel, PrescriptionStatus, Medication, Prescription
+from app.patient_backend.safety_engine import evaluate_safety_triage, classify_severity
 from app.patient_backend.rag_engine import RAGEngine
 from app.patient_backend.triage_engine import TriageEngine
 from app.patient_backend.translation import TranslationEngine
@@ -35,6 +35,72 @@ class TestBackendComponents(unittest.TestCase):
         self.assertTrue(rx.is_ai_draft)
         self.assertTrue(len(rx.medications) > 0)
         self.assertIn("Paracetamol", rx.medications[0].name)
+
+    def test_severity_urgent_red_flag_is_always_severe(self):
+        # A detected red flag overrides everything else, regardless of what
+        # the patient says about their own severity.
+        level = classify_severity(
+            risk_state=RiskState.URGENT,
+            self_reported_severity="Mild",
+            symptoms=["chest pain"],
+            associated_symptoms=[]
+        )
+        self.assertEqual(level, SeverityLevel.SEVERE)
+
+    def test_severity_self_reported_severe_without_red_flag(self):
+        # No red flag matched (LOW_RISK), but the patient described it as
+        # severe themselves — still SEVERE, per the new self-report path.
+        level = classify_severity(
+            risk_state=RiskState.LOW_RISK,
+            self_reported_severity="Severe",
+            symptoms=["body ache"],
+            associated_symptoms=[]
+        )
+        self.assertEqual(level, SeverityLevel.SEVERE)
+
+    def test_severity_moderate_from_uncertain_risk_state(self):
+        level = classify_severity(
+            risk_state=RiskState.UNCERTAIN,
+            self_reported_severity="Mild",
+            symptoms=["fever"],
+            associated_symptoms=[]
+        )
+        self.assertEqual(level, SeverityLevel.MODERATE)
+
+    def test_severity_moderate_from_symptom_count(self):
+        level = classify_severity(
+            risk_state=RiskState.LOW_RISK,
+            self_reported_severity="Mild",
+            symptoms=["fever", "cough", "headache"],
+            associated_symptoms=[]
+        )
+        self.assertEqual(level, SeverityLevel.MODERATE)
+
+    def test_severity_defaults_to_mild(self):
+        level = classify_severity(
+            risk_state=RiskState.LOW_RISK,
+            self_reported_severity="Mild",
+            symptoms=["headache"],
+            associated_symptoms=[]
+        )
+        self.assertEqual(level, SeverityLevel.MILD)
+
+    def test_triage_engine_severe_self_report_skips_draft_flow(self):
+        # End-to-end through TriageEngine.process_message: a self-reported
+        # "severe" symptom with no matching red-flag phrase should complete
+        # immediately, recommend an appointment, and NOT auto-book one (that
+        # stays reserved for a true red-flag URGENT case).
+        case = TriageCase(session_id="SESS-TEST-01", patient_id="PAT-TEST-01")
+        updated_case, ai_reply, is_complete, auto_apt, recommend_apt = TriageEngine.process_message(
+            current_case=case,
+            patient_text="I have severe body ache",
+            lang="en"
+        )
+        self.assertEqual(updated_case.severity_level, SeverityLevel.SEVERE)
+        self.assertTrue(is_complete)
+        self.assertIsNone(auto_apt)
+        self.assertTrue(recommend_apt)
+        self.assertNotEqual(updated_case.triage_status, RiskState.URGENT)
 
     def test_ml_predictor_plausible_condition(self):
         # Diarrhea + vomiting is a clean, well-represented pattern in the

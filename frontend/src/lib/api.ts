@@ -49,6 +49,8 @@ export interface Appointment {
   created_at: string;
 }
 
+export type SeverityLevel = 'MILD' | 'MODERATE' | 'SEVERE';
+
 export interface TriageCase {
   case_id: string;
   session_id: string;
@@ -57,6 +59,7 @@ export interface TriageCase {
   associated_symptoms: string[];
   duration: string;
   severity: string;
+  severity_level: SeverityLevel;
   medical_history: string[];
   medications: string[];
   allergies: string[];
@@ -88,9 +91,11 @@ export interface TriageResponse {
   language: string;
   is_complete: boolean;
   triage_status: 'LOW_RISK' | 'UNCERTAIN' | 'URGENT';
+  severity_level: SeverityLevel;
   missing_information: string[];
   case_id?: string;
   auto_booked_appointment?: Appointment;
+  recommend_appointment: boolean;
 }
 
 export const api = {

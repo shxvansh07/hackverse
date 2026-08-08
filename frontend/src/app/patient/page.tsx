@@ -25,6 +25,7 @@ export default function PatientPortal() {
   const [loading, setLoading] = useState(false);
   const [triageStatus, setTriageStatus] = useState<'LOW_RISK' | 'UNCERTAIN' | 'URGENT' | 'COLLECTING'>('COLLECTING');
   const [isComplete, setIsComplete] = useState(false);
+  const [recommendAppointment, setRecommendAppointment] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
   const [prescription, setPrescription] = useState<Prescription | null>(null);
   const [rxLang, setRxLang] = useState<string>('hi');
@@ -104,6 +105,7 @@ export default function PatientPortal() {
       ]);
       setTriageStatus('COLLECTING');
       setIsComplete(false);
+      setRecommendAppointment(false);
       setPrescription(null);
       setAppointment(null);
       setReferral(null);
@@ -360,6 +362,7 @@ export default function PatientPortal() {
     try {
       const res = await api.sendMessage(session.session_id, textToSend);
       setTriageStatus(res.triage_status);
+      setRecommendAppointment(res.recommend_appointment);
       if (res.case_id) setCaseId(res.case_id);
 
       if (res.auto_booked_appointment) {
@@ -566,6 +569,38 @@ export default function PatientPortal() {
                 <div>Status: {appointment.status}</div>
                 <div>Ref ID: {appointment.appointment_id}</div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* SEVERE (self-reported) — recommend an in-person appointment, no prescription drafted */}
+        {recommendAppointment && triageStatus !== 'URGENT' && (
+          <div className="bg-amber-50 border-2 border-amber-500 p-5 rounded-lg text-black space-y-3">
+            <h3 className="text-base font-bold uppercase tracking-wider text-amber-700">
+              In-Person Appointment Recommended
+            </h3>
+            <p className="text-xs text-amber-900 leading-relaxed font-medium">
+              Based on the severity you described, we&apos;re not drafting a home prescription for this.
+              Please book a doctor appointment so you can be examined directly.
+            </p>
+
+            {appointment ? (
+              <div className="bg-white p-3.5 rounded border-2 border-neutral-800 text-xs font-mono space-y-1">
+                <div className="font-bold text-black text-sm border-b border-neutral-200 pb-1">
+                  📅 APPOINTMENT SCHEDULED
+                </div>
+                <div><strong>Slot Time:</strong> {appointment.slot_time}</div>
+                <div><strong>Location:</strong> {appointment.clinic_location}</div>
+                <div><strong>Ref ID:</strong> {appointment.appointment_id}</div>
+              </div>
+            ) : (
+              <button
+                disabled={bookingLoading}
+                onClick={handleBookOptionalAppointment}
+                className="px-4 py-2 bg-amber-600 text-white font-bold rounded text-xs hover:bg-amber-700 disabled:opacity-50"
+              >
+                {bookingLoading ? 'Booking...' : 'Book Doctor Appointment Now'}
+              </button>
             )}
           </div>
         )}

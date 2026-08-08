@@ -3,7 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { api, TriageCase, Prescription, Medication, Appointment, ReferralInfo } from '@/lib/api';
+import { api, TriageCase, Prescription, Medication, Appointment, ReferralInfo, SeverityLevel } from '@/lib/api';
+
+const SEVERITY_BADGE: Record<SeverityLevel, string> = {
+  MILD: 'bg-green-100 text-green-800',
+  MODERATE: 'bg-amber-100 text-amber-800',
+  SEVERE: 'bg-red-100 text-red-800',
+};
 
 export default function DoctorDashboard() {
   const router = useRouter();
@@ -225,6 +231,7 @@ export default function DoctorDashboard() {
                     <th className="p-3">Patient ID</th>
                     <th className="p-3">Primary Complaint & Summary</th>
                     <th className="p-3">Risk State</th>
+                    <th className="p-3">Severity</th>
                     <th className="p-3">Status</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>
@@ -239,6 +246,11 @@ export default function DoctorDashboard() {
                         <div className="text-neutral-600 text-[11px] line-clamp-1">{c.summary_en}</div>
                       </td>
                       <td className="p-3 font-mono font-bold">[{c.triage_status}]</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${SEVERITY_BADGE[c.severity_level]}`}>
+                          {c.severity_level}
+                        </span>
+                      </td>
                       <td className="p-3 font-mono font-semibold">[{c.review_status}]</td>
                       <td className="p-3 text-right">
                         <button
@@ -262,9 +274,14 @@ export default function DoctorDashboard() {
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white max-w-4xl w-full rounded border border-neutral-400 p-6 space-y-5 max-h-[90vh] overflow-y-auto my-auto text-xs text-black shadow-2xl">
             <div className="flex justify-between items-start border-b border-neutral-300 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-black">Case Review — {activeCase.case_id}</h3>
-                <div className="text-neutral-600 font-mono">Patient: {activeCase.patient_id} | Risk: [{activeCase.triage_status}]</div>
+              <div className="flex items-center gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-black">Case Review — {activeCase.case_id}</h3>
+                  <div className="text-neutral-600 font-mono">Patient: {activeCase.patient_id} | Risk: [{activeCase.triage_status}]</div>
+                </div>
+                <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${SEVERITY_BADGE[activeCase.severity_level]}`}>
+                  {activeCase.severity_level}
+                </span>
               </div>
               <button onClick={() => setActiveCase(null)} className="text-neutral-600 hover:text-black text-sm font-mono">[Close]</button>
             </div>
@@ -389,6 +406,12 @@ export default function DoctorDashboard() {
               {/* Option B: Schedule In-Person Offline Appointment */}
               <div className="bg-neutral-50 p-3 rounded border border-neutral-300 space-y-2">
                 <div className="font-bold text-black uppercase text-[11px]">Option 2: Schedule In-Person Appointment</div>
+                {activeCase.severity_level === 'MODERATE' && (
+                  <div className="text-amber-700 bg-amber-50 border border-amber-300 rounded p-1.5 text-[10px] font-medium">
+                    ⚠ Moderate severity — this can progress to severe. Consider scheduling an in-person
+                    appointment as a precaution, even alongside approving the draft.
+                  </div>
+                )}
                 <input
                   type="text"
                   value={offlineTime}

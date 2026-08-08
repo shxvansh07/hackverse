@@ -20,6 +20,7 @@ from app.shared.models import (
     CreateSessionRequest,
     PatientSession,
     RiskState,
+    SeverityLevel,
     TriageCase,
     TriageMessageRequest,
     TriageMessageResponse,
@@ -51,7 +52,7 @@ async def handle_triage_message(payload: TriageMessageRequest):
         case = TriageCase(session_id=sess.session_id, patient_id=sess.patient_id)
         db.cases[case.case_id] = case
 
-    updated_case, ai_reply, is_complete, auto_apt = TriageEngine.process_message(
+    updated_case, ai_reply, is_complete, auto_apt, recommend_appointment = TriageEngine.process_message(
         current_case=case,
         patient_text=payload.message,
         lang=sess.preferred_language
@@ -59,7 +60,17 @@ async def handle_triage_message(payload: TriageMessageRequest):
 
     db.cases[updated_case.case_id] = updated_case
 
-    if (is_complete or updated_case.triage_status == RiskState.LOW_RISK) and not updated_case.prescription_draft_id:
+    # Severity, not just triage_status, decides whether a draft gets written:
+    # MILD/MODERATE -> draft + send to doctor for review/approval (as before,
+    # now also covering UNCERTAIN cases that resolve to MODERATE, which
+    # previously never got a draft at all). SEVERE (red-flag URGENT, or a
+    # self-reported "severe" caught in triage_engine's step 2) never drafts —
+    # skip straight to appointment recommendation instead.
+    if (
+        is_complete
+        and updated_case.severity_level in (SeverityLevel.MILD, SeverityLevel.MODERATE)
+        and not updated_case.prescription_draft_id
+    ):
         draft_rx = RAGEngine.generate_draft_prescription(
             case_id=updated_case.case_id,
             symptoms=updated_case.symptoms,
@@ -73,6 +84,7 @@ async def handle_triage_message(payload: TriageMessageRequest):
         "event": "NEW_CASE_UPDATE",
         "case_id": updated_case.case_id,
         "triage_status": updated_case.triage_status.value,
+        "severity_level": updated_case.severity_level.value,
         "symptoms": updated_case.symptoms,
         "summary_en": updated_case.summary_en,
         "created_at": updated_case.created_at
@@ -84,9 +96,11 @@ async def handle_triage_message(payload: TriageMessageRequest):
         language=sess.preferred_language,
         is_complete=is_complete,
         triage_status=updated_case.triage_status,
+        severity_level=updated_case.severity_level,
         missing_information=updated_case.missing_information,
         case_id=updated_case.case_id,
-        auto_booked_appointment=auto_apt
+        auto_booked_appointment=auto_apt,
+        recommend_appointment=recommend_appointment
     )
 
 
