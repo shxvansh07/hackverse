@@ -20,8 +20,9 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
 
 class AIService:
-    @staticmethod
+    @classmethod
     def generate_natural_response(
+        cls,
         patient_message: str,
         history: List[Dict[str, str]],
         lang: str = "hi",
