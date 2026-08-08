@@ -15,8 +15,9 @@ from __future__ import annotations
 import hmac
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import Header, HTTPException, status
 
@@ -24,6 +25,15 @@ _TOKEN_TTL_HOURS = 12
 
 #: token -> {doctor_id, doctor_name, expires_at}
 _ACTIVE_TOKENS: Dict[str, Dict[str, str]] = {}
+
+#: Brute-force protection on login. Keyed by the attempted username rather
+#: than an IP address — the router has no request context to hand this
+#: function, and the only account that exists is "doctor", so throttling that
+#: name already throttles the attack. Values are epoch timestamps of failed
+#: attempts within the current window; a successful login clears the entry.
+_MAX_FAILED_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 15 * 60
+_FAILED_ATTEMPTS: Dict[str, List[float]] = {}
 
 
 def _credentials() -> tuple[str, str]:
@@ -34,15 +44,32 @@ def _credentials() -> tuple[str, str]:
     )
 
 
+def _is_locked_out(key: str) -> bool:
+    now = time.time()
+    attempts = [t for t in _FAILED_ATTEMPTS.get(key, []) if now - t < _LOCKOUT_SECONDS]
+    _FAILED_ATTEMPTS[key] = attempts
+    return len(attempts) >= _MAX_FAILED_ATTEMPTS
+
+
+def _record_failure(key: str) -> None:
+    _FAILED_ATTEMPTS.setdefault(key, []).append(time.time())
+
+
 def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
+    lockout_key = (username or "").strip().lower() or "unknown"
+    if _is_locked_out(lockout_key):
+        return None
+
     expected_user, expected_password = _credentials()
 
     # compare_digest on both fields to avoid leaking validity through timing.
     user_ok = hmac.compare_digest(username or "", expected_user)
     password_ok = hmac.compare_digest(password or "", expected_password)
     if not (user_ok and password_ok):
+        _record_failure(lockout_key)
         return None
 
+    _FAILED_ATTEMPTS.pop(lockout_key, None)
     token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=_TOKEN_TTL_HOURS)).isoformat()
     record = {

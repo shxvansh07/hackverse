@@ -23,6 +23,8 @@ built so that it cannot drift into becoming one.
 | Translation cannot alter clinical content | `safety/guards.py::verify_translation` + `verify_medication_preserved` |
 | A drafted drug never collides with a documented allergy | `safety/guards.py::check_allergy_conflict` |
 | Symptoms, duration and history are never invented | additive-only merge in `services/triage_service.py` |
+| A patient's own "this is severe" still forces doctor review, even with no matching red-flag phrase | `safety/engine.py::assess`, step 6 |
+| Repeated failed doctor logins lock out the account for a cooldown window | `shared/auth.py::_is_locked_out` |
 
 ### The LLM has exactly one influence on routing, and it is one-directional
 
@@ -51,7 +53,13 @@ DETERMINISTIC safety assessment  ── sole authority on LOW_RISK / UNCERTAIN /
 Drugs, doses, frequencies and durations are copied **verbatim** from
 `knowledge/formulary.json`. The LLM writes the rationale prose and nothing else. A
 model cannot introduce a medication a human did not put in that file. If no protocol
-matches, the draft is deliberately empty and the doctor prescribes from scratch.
+matches, the draft is deliberately empty and the doctor prescribes from scratch —
+**except** that a broader statistical classifier (`patient_backend/ml_predictor.py`,
+trained on a real public 41-condition symptom dataset, well beyond the 6 conditions the
+curated formulary covers) may add a diagnostic *hypothesis* — a condition name,
+confidence and description — as reference text for the doctor. It is never permitted to
+add, substitute or dose a medication; that boundary is enforced in `rag/engine.py`, not
+merely by convention, and is covered by `tests/test_ml_predictor.py`.
 
 ---
 
@@ -203,15 +211,24 @@ changes.
 
 ## Known limitations
 
-- **Authentication is demo-grade.** Env-var credentials and in-memory tokens. Replace
-  with a real identity provider before any real use.
+- **Authentication is demo-grade.** Env-var credentials and in-memory tokens, now with
+  brute-force lockout (`shared/auth.py`). Replace with a real identity provider before
+  any real use — this is still not password hashing or a user store.
 - **Red-flag matching is lexical.** Phrase matching plus a bounded-proximity token
   match. It errs toward over-detection on purpose, but it is not semantic and will
   miss unusual phrasings.
 - **The formulary is illustrative**, curated for demonstration and not clinically
-  validated. Six protocols covering common self-limiting presentations.
+  validated. Six protocols covering common self-limiting presentations, backed by a
+  41-condition statistical classifier for diagnostic *reasoning breadth* — see
+  "Where medications actually come from" above. Neither is a substitute for a real
+  clinical knowledge base.
 - **Translation is verified, not guaranteed.** Numeric drift is caught and falls back
   to English; nuance loss within unchanged numbers would not be.
+- **`npm audit` flags known Next.js 14.2.x CVEs** (DoS/SSRF/cache-poisoning classes in
+  Server Actions, Middleware and the Image Optimizer). The fix is a major-version bump
+  to Next 16, which has real breaking changes — not done here without dedicated
+  regression testing across every page. Treat this as an open item before a public
+  deployment, not as done.
 
 ## Not built, by design
 

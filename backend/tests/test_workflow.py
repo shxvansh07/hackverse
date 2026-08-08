@@ -79,6 +79,36 @@ def test_bad_credentials_rejected():
     assert resp.status_code == 401
 
 
+def test_repeated_failed_logins_lock_out_even_correct_credentials():
+    """Brute-force protection: enough wrong attempts against one username
+    locks it out for a cooldown window, regardless of what is tried next —
+    including the real password. Explicitly restores auth module state
+    afterwards so later tests' auth_headers() fixture is unaffected."""
+    from app.shared import auth as auth_module
+
+    saved_attempts = dict(auth_module._FAILED_ATTEMPTS)
+    saved_tokens = dict(auth_module._ACTIVE_TOKENS)
+    try:
+        auth_module._FAILED_ATTEMPTS.clear()
+        for _ in range(auth_module._MAX_FAILED_ATTEMPTS):
+            resp = client.post(
+                "/api/auth/doctor/login",
+                json={"username": DOCTOR_USER, "password": "definitely-wrong"},
+            )
+            assert resp.status_code == 401
+
+        # One more attempt, this time with the real password — still locked out.
+        resp = client.post(
+            "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
+        )
+        assert resp.status_code == 401
+    finally:
+        auth_module._FAILED_ATTEMPTS.clear()
+        auth_module._FAILED_ATTEMPTS.update(saved_attempts)
+        auth_module._ACTIVE_TOKENS.clear()
+        auth_module._ACTIVE_TOKENS.update(saved_tokens)
+
+
 # ---------------------------------------------------------------------------
 # The URGENT invariant
 # ---------------------------------------------------------------------------
