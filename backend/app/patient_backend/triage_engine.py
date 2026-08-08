@@ -1,7 +1,6 @@
 import re
 from typing import Dict, Any, List, Tuple
-from datetime import datetime, timedelta
-from app.shared.models import TriageCase, ChatMessage, RiskState, Appointment, AppointmentType
+from app.shared.models import TriageCase, ChatMessage, RiskState
 from app.patient_backend.safety_engine import evaluate_safety_triage, recommend_specialty
 from app.patient_backend.ai_service import AIService
 from app.shared.database import db
@@ -125,38 +124,27 @@ class TriageEngine:
         current_case.triage_status = risk_state
         current_case.red_flags = red_flags
 
-        auto_appointment = None
-
-        # 1. Urgent Red Flag Handling
+        # 1. Urgent Red Flag Handling — do NOT auto-book. Warn immediately and
+        # ask the patient to give a final confirmation before an emergency
+        # appointment is reserved.
         if risk_state == RiskState.URGENT:
             current_case.recommended_specialty = recommend_specialty(red_flags)
 
-            auto_appointment = Appointment(
-                case_id=current_case.case_id,
-                patient_id=current_case.patient_id,
-                type=AppointmentType.URGENT_EMERGENCY,
-                slot_time=(datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M"),
-                notes=f"EMERGENCY AUTO-BOOKED: Red Flags {', '.join(red_flags)}",
-                specialty=current_case.recommended_specialty
-            )
-            db.appointments[auto_appointment.appointment_id] = auto_appointment
-            current_case.appointment_id = auto_appointment.appointment_id
-
             ai_reply = (
                 "⚠️ ध्यान दें: आपके बताए लक्षणों में तुरंत डॉक्टर देखभाल की आवश्यकता है। "
-                f"आपके लिए आपातकालीन डॉक्टर अपॉइंटमेंट स्वतः बुक कर दिया गया है (समय: {auto_appointment.slot_time})। "
                 f"अनुशंसित विशेषज्ञ: {current_case.recommended_specialty}। "
-                "कृपया बिना देरी किए आपातकालीन विभाग या डॉक्टर से तुरंत संपर्क करें।"
+                "कृपया बिना देरी किए आपातकालीन विभाग या डॉक्टर से तुरंत संपर्क करें। "
+                "कृपया नीचे पुष्टि करें ताकि हम आपके लिए एक आपातकालीन अपॉइंटमेंट आरक्षित कर सकें।"
                 if lang == "hi" else
                 "⚠️ Warning: The symptoms you entered indicate a high-risk condition. "
-                f"An URGENT Doctor Emergency Appointment has been reserved for you (Slot: {auto_appointment.slot_time}). "
                 f"Recommended specialist: {current_case.recommended_specialty}. "
-                "Please proceed immediately to the nearest emergency room."
+                "Please proceed immediately to the nearest emergency room or contact a doctor without delay. "
+                "Please confirm below so we can reserve an emergency appointment for you."
             )
 
             current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
             current_case.summary_en = cls.build_english_summary(current_case)
-            return current_case, ai_reply, True, auto_appointment
+            return current_case, ai_reply, True, None
 
         # 2. Uncertain / Ambiguous Cases: stop the conversation and point the
         # patient at an in-person specialist instead of auto-booking or

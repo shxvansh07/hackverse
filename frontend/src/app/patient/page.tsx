@@ -34,6 +34,7 @@ export default function PatientPortal() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
   const [specialistBookingLoading, setSpecialistBookingLoading] = useState(false);
+  const [emergencyBookingLoading, setEmergencyBookingLoading] = useState(false);
 
   // VAD & Voice Call Engine State & REFS
   const [isCallActive, setIsCallActive] = useState(false);
@@ -454,6 +455,19 @@ export default function PatientPortal() {
     }
   };
 
+  const handleConfirmEmergencyAppointment = async () => {
+    if (!caseId) return;
+    setEmergencyBookingLoading(true);
+    try {
+      const apt = await api.bookAppointment(caseId);
+      setAppointment(apt);
+    } catch (err) {
+      console.error('Emergency booking error:', err);
+    } finally {
+      setEmergencyBookingLoading(false);
+    }
+  };
+
   const handleBookSpecialistAppointment = async () => {
     if (!caseId || !recommendedSpecialty) return;
     setSpecialistBookingLoading(true);
@@ -579,13 +593,28 @@ export default function PatientPortal() {
               High-risk medical symptoms detected. Please proceed immediately to an emergency room or call emergency medical services.
             </p>
 
-            {appointment && (
+            {appointment ? (
               <div className="bg-white p-3 rounded border border-red-300 text-xs font-mono space-y-1">
-                <div className="font-bold text-red-700">[AUTO-BOOKED EMERGENCY APPOINTMENT]</div>
+                <div className="font-bold text-red-700">[EMERGENCY APPOINTMENT CONFIRMED]</div>
                 <div>Time Slot: {appointment.slot_time}</div>
                 <div>Status: {appointment.status}</div>
                 <div>Ref ID: {appointment.appointment_id}</div>
-                {recommendedSpecialty && <div>Recommended Specialist: {recommendedSpecialty}</div>}
+                {(appointment.specialty || recommendedSpecialty) && (
+                  <div>Recommended Specialist: {appointment.specialty || recommendedSpecialty}</div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white p-3 rounded border border-red-300 space-y-2">
+                {recommendedSpecialty && (
+                  <div className="text-xs font-mono text-red-700">Recommended Specialist: {recommendedSpecialty}</div>
+                )}
+                <button
+                  disabled={emergencyBookingLoading}
+                  onClick={handleConfirmEmergencyAppointment}
+                  className="w-full px-4 py-2 bg-red-600 text-white font-bold rounded text-xs hover:bg-red-700 disabled:opacity-50"
+                >
+                  {emergencyBookingLoading ? 'Booking...' : 'Confirm & Book Emergency Appointment Now'}
+                </button>
               </div>
             )}
           </div>

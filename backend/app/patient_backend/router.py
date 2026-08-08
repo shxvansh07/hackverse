@@ -123,15 +123,30 @@ def book_appointment(payload: BookAppointmentRequest):
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    slot = payload.slot_time if payload.slot_time else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
-    location = payload.clinic_location if payload.clinic_location else "Main OPD Clinic, Room 102"
-
-    if payload.specialty:
-        apt_type = AppointmentType.SPECIALIST_CONSULT
-    elif case.triage_status == RiskState.URGENT:
+    # URGENT always resolves to an emergency slot regardless of whether a
+    # specialty was also passed — case triage status takes precedence.
+    if case.triage_status == RiskState.URGENT:
         apt_type = AppointmentType.URGENT_EMERGENCY
+    elif payload.specialty:
+        apt_type = AppointmentType.SPECIALIST_CONSULT
     else:
         apt_type = AppointmentType.OPTIONAL_CONSULT
+
+    if payload.slot_time:
+        slot = payload.slot_time
+    elif apt_type == AppointmentType.URGENT_EMERGENCY:
+        slot = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M")
+    else:
+        slot = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
+
+    location = payload.clinic_location if payload.clinic_location else "Main OPD Clinic, Room 102"
+
+    notes = "Patient requested consultation appointment"
+    if apt_type == AppointmentType.URGENT_EMERGENCY:
+        notes = (
+            f"PATIENT-CONFIRMED EMERGENCY APPOINTMENT: Red Flags {', '.join(case.red_flags)}"
+            if case.red_flags else "Patient-confirmed emergency appointment"
+        )
 
     apt = Appointment(
         case_id=case.case_id,
@@ -139,8 +154,8 @@ def book_appointment(payload: BookAppointmentRequest):
         type=apt_type,
         slot_time=slot,
         clinic_location=location,
-        notes="Patient requested consultation appointment",
-        specialty=payload.specialty
+        notes=notes,
+        specialty=payload.specialty or case.recommended_specialty
     )
     db.appointments[apt.appointment_id] = apt
     case.appointment_id = apt.appointment_id
