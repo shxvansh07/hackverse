@@ -65,7 +65,10 @@ async def handle_triage_message(payload: TriageMessageRequest):
     # now also covering UNCERTAIN cases that resolve to MODERATE, which
     # previously never got a draft at all). SEVERE (red-flag URGENT, or a
     # self-reported "severe" caught in triage_engine's step 2) never drafts —
-    # skip straight to appointment recommendation instead.
+    # skip straight to appointment recommendation instead. (Deliberately NOT
+    # triage_status in (LOW_RISK, URGENT) -- URGENT must never get a draft,
+    # a case needing an emergency appointment has no business also getting a
+    # home prescription.)
     if (
         is_complete
         and updated_case.severity_level in (SeverityLevel.MILD, SeverityLevel.MODERATE)
@@ -100,7 +103,8 @@ async def handle_triage_message(payload: TriageMessageRequest):
         missing_information=updated_case.missing_information,
         case_id=updated_case.case_id,
         auto_booked_appointment=auto_apt,
-        recommend_appointment=recommend_appointment
+        recommend_appointment=recommend_appointment,
+        recommended_specialty=updated_case.recommended_specialty
     )
 
 
@@ -139,13 +143,21 @@ def book_appointment(payload: BookAppointmentRequest):
     slot = payload.slot_time if payload.slot_time else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
     location = payload.clinic_location if payload.clinic_location else "Main OPD Clinic, Room 102"
 
+    if payload.specialty:
+        apt_type = AppointmentType.SPECIALIST_CONSULT
+    elif case.triage_status == RiskState.URGENT:
+        apt_type = AppointmentType.URGENT_EMERGENCY
+    else:
+        apt_type = AppointmentType.OPTIONAL_CONSULT
+
     apt = Appointment(
         case_id=case.case_id,
         patient_id=case.patient_id,
-        type=AppointmentType.OPTIONAL_CONSULT if case.triage_status != RiskState.URGENT else AppointmentType.URGENT_EMERGENCY,
+        type=apt_type,
         slot_time=slot,
         clinic_location=location,
-        notes="Patient requested consultation appointment"
+        notes="Patient requested consultation appointment",
+        specialty=payload.specialty
     )
     db.appointments[apt.appointment_id] = apt
     case.appointment_id = apt.appointment_id

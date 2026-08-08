@@ -41,11 +41,12 @@ export interface Appointment {
   patient_id: string;
   doctor_id: string;
   doctor_name: string;
-  type: 'OPTIONAL_CONSULT' | 'URGENT_EMERGENCY' | 'DOCTOR_SCHEDULED_OFFLINE';
+  type: 'OPTIONAL_CONSULT' | 'URGENT_EMERGENCY' | 'DOCTOR_SCHEDULED_OFFLINE' | 'SPECIALIST_CONSULT';
   slot_time: string;
   clinic_location: string;
   status: string;
   notes: string;
+  specialty?: string;
   created_at: string;
 }
 
@@ -66,6 +67,7 @@ export interface TriageCase {
   red_flags: string[];
   missing_information: string[];
   triage_status: 'LOW_RISK' | 'UNCERTAIN' | 'URGENT';
+  recommended_specialty?: string;
   review_status: 'PENDING' | 'APPROVED' | 'MODIFIED' | 'REJECTED' | 'NEEDS_REVIEW' | 'REFERRED' | 'OFFLINE_SCHEDULED';
   summary_en: string;
   transcript: ChatMessage[];
@@ -96,6 +98,7 @@ export interface TriageResponse {
   case_id?: string;
   auto_booked_appointment?: Appointment;
   recommend_appointment: boolean;
+  recommended_specialty?: string;
 }
 
 export const api = {
@@ -209,11 +212,11 @@ export const api = {
   },
 
   // Book Appointment
-  async bookAppointment(caseId: string, slotTime?: string, clinicLocation?: string): Promise<Appointment> {
+  async bookAppointment(caseId: string, slotTime?: string, clinicLocation?: string, specialty?: string): Promise<Appointment> {
     const res = await fetch(`${API_BASE}/api/appointments/book`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: caseId, slot_time: slotTime, clinic_location: clinicLocation }),
+      body: JSON.stringify({ case_id: caseId, slot_time: slotTime, clinic_location: clinicLocation, specialty }),
     });
     if (!res.ok) throw new Error('Failed to book appointment');
     return res.json();

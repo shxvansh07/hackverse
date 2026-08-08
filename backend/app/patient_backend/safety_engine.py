@@ -38,6 +38,35 @@ RED_FLAG_PATTERNS = {
     ]
 }
 
+RED_FLAG_TO_SPECIALTY = {
+    "CHEST_PAIN": "Cardiology",
+    "RESPIRATORY_DISTRESS": "Pulmonology",
+    "STROKE_NEURO": "Neurology",
+    "HIGH_FEVER_INFANT": "General Physician / Internal Medicine",
+    "LOSS_OF_CONSCIOUSNESS": "Neurology",
+    "SEVERE_BLEEDING": "General Surgery",
+    "ANAPHYLAXIS": "General Surgery",
+    "SEVERE_ABDOMINAL": "Gastroenterology"
+}
+
+FALLBACK_SPECIALTY = "General Physician / Internal Medicine"
+
+SPECIALTY_LOOKUP = {
+    category.replace("_", " ").title(): specialty
+    for category, specialty in RED_FLAG_TO_SPECIALTY.items()
+}
+
+def recommend_specialty(red_flags: List[str]) -> str:
+    """
+    Maps detected red flags to a recommended specialist.
+    Falls back to a general physician when no red flag maps cleanly
+    (e.g. the UNCERTAIN fever+rash/stiff-neck heuristic).
+    """
+    for flag in red_flags:
+        if flag in SPECIALTY_LOOKUP:
+            return SPECIALTY_LOOKUP[flag]
+    return FALLBACK_SPECIALTY
+
 def evaluate_safety_triage(
     symptoms: List[str],
     associated_symptoms: List[str],
