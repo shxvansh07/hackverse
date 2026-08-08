@@ -1,146 +1,245 @@
-"""Patient-facing endpoints: intake session, triage conversation, prescription
-retrieval, and appointment booking. Owned by the Patient Backend part of the
-team (conversation/triage/safety/RAG/translation engines this router calls
-into live in ai_service.py, triage_engine.py, safety_engine.py, rag_engine.py,
-translation.py — same ownership).
+"""Patient-facing endpoints.
 
-Shares app.database.db / ws_manager with routers/doctor.py — that's the same
-in-memory store both portals read and write, not a duplication.
+Nothing here reaches a prescription directly. Draft creation goes through
+CaseService, and the only route that returns prescription content
+(`GET /api/prescriptions/{id}`) is gated by guards.may_release_to_patient, so
+a draft cannot reach a patient even if its id is known.
 """
 
-from datetime import datetime, timedelta
+from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.shared.database import db, ws_manager
+from app.safety import guards
+from app.services.case_service import CaseService
+from app.services.prescription_service import PrescriptionService
+from app.services.triage_service import TriageService
+from app.shared.database import db
+from app.shared.languages import all_languages, is_supported, resolve
 from app.shared.models import (
-    Appointment,
-    AppointmentType,
-    BookAppointmentRequest,
+    AssessRequest,
+    AssessResponse,
+    CreateCaseRequest,
     CreateSessionRequest,
     PatientSession,
+    PatientStatus,
+    PatientStatusResponse,
+    PresentedPrescription,
+    PrescriptionStatus,
     RiskState,
     TriageCase,
     TriageMessageRequest,
     TriageMessageResponse,
 )
-from app.patient_backend.rag_engine import RAGEngine
-from app.patient_backend.translation import TranslationEngine
-from app.patient_backend.triage_engine import TriageEngine
 
-router = APIRouter()
+router = APIRouter(tags=["patient"])
+
+
+@router.get("/api/languages")
+def list_languages():
+    """Language menu for the patient UI, including Web Speech API tags."""
+    return {
+        "languages": [
+            {
+                "code": lang.code,
+                "english_name": lang.english_name,
+                "native_name": lang.native_name,
+                "speech_tag": lang.speech_tag,
+                "mvp": lang.mvp,
+            }
+            for lang in all_languages()
+        ]
+    }
 
 
 @router.post("/api/patient/session", response_model=PatientSession)
 def create_patient_session(payload: CreateSessionRequest):
-    sess = PatientSession(preferred_language=payload.preferred_language)
-    db.sessions[sess.session_id] = sess
-    case = TriageCase(session_id=sess.session_id, patient_id=sess.patient_id)
-    db.cases[case.case_id] = case
-    return sess
+    if not is_supported(payload.preferred_language):
+        raise HTTPException(status_code=400, detail="Unsupported language")
+    session, _ = TriageService.create_session(
+        preferred_language=payload.preferred_language,
+        patient_name=payload.patient_name or "Patient",
+    )
+    return session
 
 
 @router.post("/api/triage/message", response_model=TriageMessageResponse)
 async def handle_triage_message(payload: TriageMessageRequest):
-    sess = db.sessions.get(payload.session_id)
-    if not sess:
+    session = db.get_session(payload.session_id)
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    case = next((c for c in db.cases.values() if c.session_id == payload.session_id), None)
+    case = db.get_case_by_session(payload.session_id)
     if not case:
-        case = TriageCase(session_id=sess.session_id, patient_id=sess.patient_id)
-        db.cases[case.case_id] = case
+        raise HTTPException(status_code=404, detail="No case for this session")
 
-    updated_case, ai_reply, is_complete, auto_apt = TriageEngine.process_message(
-        current_case=case,
-        patient_text=payload.message,
-        lang=sess.preferred_language
-    )
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    db.cases[updated_case.case_id] = updated_case
+    result = await TriageService.process_message(session, case, payload.message.strip())
+    assessment = result["assessment"]
 
-    if (is_complete or updated_case.triage_status == RiskState.LOW_RISK) and not updated_case.prescription_draft_id:
-        draft_rx = RAGEngine.generate_draft_prescription(
-            case_id=updated_case.case_id,
-            symptoms=updated_case.symptoms,
-            summary_en=updated_case.summary_en
-        )
-        db.prescriptions[draft_rx.prescription_id] = draft_rx
-        updated_case.prescription_draft_id = draft_rx.prescription_id
-        sess.status = "WAITING_DOCTOR"
-
-    await ws_manager.broadcast({
-        "event": "NEW_CASE_UPDATE",
-        "case_id": updated_case.case_id,
-        "triage_status": updated_case.triage_status.value,
-        "symptoms": updated_case.symptoms,
-        "summary_en": updated_case.summary_en,
-        "created_at": updated_case.created_at
-    })
+    # URGENT hands off immediately. Waiting for the patient to finish an
+    # interview they should not be finishing is the wrong behaviour.
+    if result["urgent"]:
+        await CaseService.finalise_assessment(session, case)
+        await CaseService.hand_off(session, case)
 
     return TriageMessageResponse(
-        session_id=sess.session_id,
-        ai_response=ai_reply,
-        language=sess.preferred_language,
-        is_complete=is_complete,
-        triage_status=updated_case.triage_status,
-        missing_information=updated_case.missing_information,
-        case_id=updated_case.case_id,
-        auto_booked_appointment=auto_apt
+        session_id=session.session_id,
+        case_id=case.case_id,
+        ai_response=result["reply"],
+        language=session.preferred_language,
+        patient_status=session.status,
+        triage_status=assessment.risk_state,
+        is_complete=result["is_complete"],
+        missing_information=assessment.missing_information,
+        red_flags=assessment.red_flags,
+        urgent_guidance=result.get("urgent_guidance"),
+        clinical_state=case,
+    )
+
+
+@router.post("/api/triage/assess", response_model=AssessResponse)
+async def assess_session(payload: AssessRequest):
+    """Run the final safety assessment and, only where permitted, draft."""
+    session = db.get_session(payload.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    case = db.get_case_by_session(payload.session_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="No case for this session")
+
+    outcome = await CaseService.finalise_assessment(session, case)
+    assessment = outcome["assessment"]
+
+    return AssessResponse(
+        session_id=session.session_id,
+        case_id=case.case_id,
+        triage_status=assessment.risk_state,
+        safety_signal=case.safety_signal,
+        summary_en=case.summary_en,
+        draft_generated=outcome["draft_generated"],
+        draft_blocked_reason=outcome["blocked_reason"],
+        patient_status=session.status,
     )
 
 
 @router.get("/api/triage/{session_id}")
 def get_triage_state(session_id: str):
-    sess = db.sessions.get(session_id)
-    if not sess:
-        raise HTTPException(status_code=404, detail="Session not found")
-    case = next((c for c in db.cases.values() if c.session_id == session_id), None)
-    rx = db.prescriptions.get(case.prescription_draft_id) if (case and case.prescription_draft_id) else None
-    apt = db.appointments.get(case.appointment_id) if (case and case.appointment_id) else None
+    """Current structured clinical state.
 
+    Never includes prescription content: the patient view fetches that through
+    the guarded prescription route once review is complete.
+    """
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    case = db.get_case_by_session(session_id)
     return {
-        "session": sess,
+        "session": session,
         "case": case,
-        "prescription_draft": rx,
-        "appointment": apt
+        "triage_status": case.triage_status.value if case else RiskState.UNCERTAIN.value,
+        "missing_information": case.missing_information if case else [],
     }
 
 
-@router.get("/api/prescriptions/{prescription_id}")
-def get_prescription(prescription_id: str, lang: str = Query("en")):
-    rx = db.prescriptions.get(prescription_id)
-    if not rx:
+@router.post("/api/cases", response_model=TriageCase)
+async def create_case(payload: CreateCaseRequest):
+    """Hand the completed intake off to the doctor queue."""
+    session = db.get_session(payload.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    case = db.get_case_by_session(payload.session_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="No case for this session")
+
+    if not case.summary_en or case.safety_signal is None:
+        await CaseService.finalise_assessment(session, case)
+
+    return await CaseService.hand_off(session, case)
+
+
+@router.get("/api/patient/status/{session_id}", response_model=PatientStatusResponse)
+def get_patient_status(session_id: str):
+    """Polled by the waiting screen.
+
+    Deliberately coarse. A patient learns that review is complete, never that
+    a doctor rejected an AI suggestion.
+    """
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    case = db.get_case_by_session(session_id)
+    if not case:
+        return PatientStatusResponse(
+            session_id=session_id,
+            patient_status=session.status,
+            triage_status=RiskState.UNCERTAIN,
+            message="Session in progress.",
+        )
+
+    prescription = db.get_prescription_for_case(case.case_id)
+    release = guards.may_release_to_patient(prescription)
+    rejected = (
+        prescription is not None
+        and prescription.status == PrescriptionStatus.REJECTED
+    )
+
+    if release.allowed:
+        message = "Your doctor has completed the review. Your prescription is ready."
+    elif rejected:
+        message = (
+            "Your doctor has completed the review and did not issue a prescription. "
+            "Please follow up with your doctor for next steps."
+        )
+    elif case.triage_status == RiskState.URGENT:
+        message = (
+            "This case has been escalated for urgent medical attention. "
+            "Please seek emergency care now."
+        )
+    else:
+        message = "Your information has been sent for doctor review."
+
+    return PatientStatusResponse(
+        session_id=session_id,
+        case_id=case.case_id,
+        patient_status=session.status,
+        triage_status=case.triage_status,
+        review_complete=release.allowed or rejected,
+        prescription_available=release.allowed,
+        prescription_id=prescription.prescription_id if release.allowed else None,
+        rejected=rejected,
+        message=message,
+    )
+
+
+@router.get("/api/prescriptions/{prescription_id}", response_model=PresentedPrescription)
+async def get_prescription(prescription_id: str, lang: str = Query("en")):
+    """Return a prescription in the requested language.
+
+    THE release gate. A draft, a rejected draft, or anything lacking doctor
+    attribution returns 409 with the reason rather than any content.
+    """
+    prescription = db.get_prescription(prescription_id)
+    if not prescription:
         raise HTTPException(status_code=404, detail="Prescription not found")
 
-    return TranslationEngine.get_translated_prescription(rx, lang=lang)
+    release = guards.may_release_to_patient(prescription)
+    if not release.allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": release.reason,
+                "message": release.details[0] if release.details else "Not available.",
+            },
+        )
 
+    if not is_supported(lang):
+        lang = "en"
 
-@router.post("/api/appointments/book", response_model=Appointment)
-def book_appointment(payload: BookAppointmentRequest):
-    case = db.cases.get(payload.case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    slot = payload.slot_time if payload.slot_time else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
-    location = payload.clinic_location if payload.clinic_location else "Main OPD Clinic, Room 102"
-
-    apt = Appointment(
-        case_id=case.case_id,
-        patient_id=case.patient_id,
-        type=AppointmentType.OPTIONAL_CONSULT if case.triage_status != RiskState.URGENT else AppointmentType.URGENT_EMERGENCY,
-        slot_time=slot,
-        clinic_location=location,
-        notes="Patient requested consultation appointment"
-    )
-    db.appointments[apt.appointment_id] = apt
-    case.appointment_id = apt.appointment_id
-    return apt
-
-
-@router.get("/api/appointments/{appointment_id}", response_model=Appointment)
-def get_appointment(appointment_id: str):
-    apt = db.appointments.get(appointment_id)
-    if not apt:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    return apt
+    return await PrescriptionService.present(prescription, resolve(lang).code)

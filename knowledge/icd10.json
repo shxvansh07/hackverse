@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "name": "ICD-10 Reference Subset",
+    "version": "1.0.0",
+    "scope": "Minimal subset covering the conditions represented in the curated formulary. Used to attach a coded reference to a draft, not to assert a diagnosis."
+  },
+  "codes": [
+    { "code": "R50.9", "title": "Fever, unspecified", "chapter": "Symptoms, signs and abnormal clinical findings" },
+    { "code": "J00",   "title": "Acute nasopharyngitis (common cold)", "chapter": "Diseases of the respiratory system" },
+    { "code": "J30.9", "title": "Allergic rhinitis, unspecified", "chapter": "Diseases of the respiratory system" },
+    { "code": "K21.9", "title": "Gastro-oesophageal reflux disease without oesophagitis", "chapter": "Diseases of the digestive system" },
+    { "code": "K59.1", "title": "Functional diarrhoea", "chapter": "Diseases of the digestive system" },
+    { "code": "G44.2", "title": "Tension-type headache", "chapter": "Diseases of the nervous system" },
+    { "code": "R07.9", "title": "Chest pain, unspecified", "chapter": "Symptoms, signs and abnormal clinical findings" },
+    { "code": "R06.0", "title": "Dyspnoea", "chapter": "Symptoms, signs and abnormal clinical findings" },
+    { "code": "R55",   "title": "Syncope and collapse", "chapter": "Symptoms, signs and abnormal clinical findings" },
+    { "code": "T78.2", "title": "Anaphylactic shock, unspecified", "chapter": "Injury, poisoning and external causes" },
+    { "code": "I64",   "title": "Stroke, not specified as haemorrhage or infarction", "chapter": "Diseases of the circulatory system" },
+    { "code": "R10.0", "title": "Acute abdomen", "chapter": "Symptoms, signs and abnormal clinical findings" },
+    { "code": "Z88.9", "title": "Allergy status to unspecified drugs, medicaments and biological substances", "chapter": "Factors influencing health status" },
+    { "code": "Z71.9", "title": "Counselling, unspecified", "chapter": "Factors influencing health status" }
+  ]
+}

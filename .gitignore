@@ -54,3 +54,10 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Runtime clinical state. Contains patient conversations and prescriptions —
+# must never be committed.
+backend/data/
+data/
+*.state.json
+audit.log

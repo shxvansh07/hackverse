@@ -1,0 +1,151 @@
+{
+  "_meta": {
+    "name": "Deterministic Red-Flag Triage Reference",
+    "version": "1.0.0",
+    "authority": "This file is the SOLE source of URGENT classification. The LLM may suggest a red flag, but only a match against this file can set state URGENT. Application logic evaluates these patterns; the model never decides routing.",
+    "match_strategy": "case-insensitive substring match over normalized patient text plus extracted symptom terms"
+  },
+  "red_flags": [
+    {
+      "code": "CHEST_PAIN",
+      "label": "Chest Pain",
+      "clinical_concern": "Acute coronary syndrome, pulmonary embolism, aortic dissection",
+      "severity": "CRITICAL",
+      "patterns": [
+        "chest pain", "chest tightness", "chest pressure", "pain in chest",
+        "crushing chest", "tightness in chest", "heaviness in chest",
+        "pain radiating to arm", "pain radiating to jaw", "pain radiating to left arm",
+        "seene me dard", "seene mein dard", "chhati me dard", "seene me bhari",
+        "छाती में दर्द", "सीने में दर्द", "छाती में जकड़न", "सीने में भारीपन"
+      ]
+    },
+    {
+      "code": "RESPIRATORY_DISTRESS",
+      "label": "Respiratory Distress",
+      "clinical_concern": "Acute asthma, pneumonia, pulmonary oedema, anaphylaxis",
+      "severity": "CRITICAL",
+      "patterns": [
+        "shortness of breath", "difficulty breathing", "cannot breathe", "can not breathe",
+        "trouble breathing", "breathless", "gasping for air", "severe wheezing",
+        "saans lene me dikkat", "sans lene me dikkat", "saans phool rahi", "dam ghut raha",
+        "सांस लेने में तकलीफ", "साँस लेने में दिक्कत", "सांस फूल रही", "दम घुट रहा"
+      ]
+    },
+    {
+      "code": "STROKE_NEURO",
+      "label": "Suspected Stroke / Acute Neurological Deficit",
+      "clinical_concern": "Cerebrovascular accident, transient ischaemic attack",
+      "severity": "CRITICAL",
+      "patterns": [
+        "face drooping", "arm weakness", "slurred speech", "sudden numbness",
+        "sudden paralysis", "one side weakness", "cannot move one side",
+        "sudden confusion", "sudden vision loss",
+        "bolne me dikkat", "chehra tedha", "ek taraf kamzori", "lakwa",
+        "लकवा", "चेहरा टेढ़ा", "बोलने में दिक्कत", "एक तरफ कमजोरी"
+      ]
+    },
+    {
+      "code": "LOSS_OF_CONSCIOUSNESS",
+      "label": "Loss of Consciousness",
+      "clinical_concern": "Syncope, arrhythmia, seizure, hypoglycaemia, head injury",
+      "severity": "CRITICAL",
+      "patterns": [
+        "fainted", "unconscious", "passed out", "blacked out", "lost consciousness",
+        "behosh", "behoosh", "behosh ho gaya", "बेहोश", "बेहोशी"
+      ]
+    },
+    {
+      "code": "SEVERE_BLEEDING",
+      "label": "Severe or Internal Bleeding",
+      "clinical_concern": "Haemorrhage, upper GI bleed, haemoptysis",
+      "severity": "CRITICAL",
+      "patterns": [
+        "uncontrolled bleeding", "coughing blood", "vomiting blood", "blood in vomit",
+        "blood in stool", "black tarry stool", "heavy bleeding",
+        "khoon ki ulti", "khoon beh raha", "khoon aa raha",
+        "खून की उल्टी", "खून बह रहा", "खून आ रहा"
+      ]
+    },
+    {
+      "code": "ANAPHYLAXIS",
+      "label": "Suspected Anaphylaxis",
+      "clinical_concern": "Life-threatening systemic allergic reaction",
+      "severity": "CRITICAL",
+      "patterns": [
+        "swelling of lips", "swelling of tongue", "throat closing", "throat tightness",
+        "lips swollen", "tongue swollen", "hives all over", "sudden severe rash with breathing",
+        "gala band ho raha", "hoth soojh gaye", "jeebh soojh gayi",
+        "गला बंद होना", "होंठ सूज", "जीभ सूज"
+      ]
+    },
+    {
+      "code": "SEVERE_ABDOMINAL",
+      "label": "Severe Acute Abdominal Pain",
+      "clinical_concern": "Perforation, appendicitis, ectopic pregnancy, obstruction",
+      "severity": "HIGH",
+      "patterns": [
+        "severe sudden abdominal pain", "excruciating stomach pain", "unbearable stomach pain",
+        "rigid abdomen", "cannot touch my stomach",
+        "pet me severe dard", "pet me asahay dard", "pet me bahut tez dard",
+        "पेट में अत्यधिक दर्द", "पेट में असहनीय दर्द"
+      ]
+    },
+    {
+      "code": "HIGH_FEVER_INFANT",
+      "label": "High Fever in Infant",
+      "clinical_concern": "Serious bacterial infection in a young child",
+      "severity": "CRITICAL",
+      "patterns": [
+        "infant fever", "baby fever high", "newborn fever", "fever above 104", "fever 104",
+        "bachhe ko tez bukhar", "bache ko tez bukhar", "navjaat ko bukhar",
+        "बच्चे को तेज़ बुखार", "नवजात को बुखार"
+      ]
+    },
+    {
+      "code": "SUICIDAL_IDEATION",
+      "label": "Self-Harm or Suicidal Ideation",
+      "clinical_concern": "Psychiatric emergency requiring immediate human support",
+      "severity": "CRITICAL",
+      "patterns": [
+        "want to kill myself", "want to end my life", "suicidal", "harm myself",
+        "no reason to live", "khudkushi", "apni jaan lena",
+        "आत्महत्या", "खुदकुशी", "जान देना"
+      ]
+    },
+    {
+      "code": "PREGNANCY_EMERGENCY",
+      "label": "Pregnancy-Related Emergency",
+      "clinical_concern": "Antepartum haemorrhage, pre-eclampsia, miscarriage",
+      "severity": "CRITICAL",
+      "patterns": [
+        "pregnant and bleeding", "bleeding during pregnancy", "pregnant severe pain",
+        "no fetal movement", "baby not moving",
+        "pregnancy me khoon", "गर्भावस्था में खून"
+      ]
+    }
+  ],
+  "uncertain_combinations": [
+    {
+      "code": "FEVER_RASH",
+      "label": "Fever with rash",
+      "clinical_concern": "Dengue, meningococcaemia, measles",
+      "all_of": ["fever", "rash"],
+      "rationale": "Fever with rash may indicate dengue or meningococcal disease and requires clinician evaluation."
+    },
+    {
+      "code": "FEVER_NECK_STIFFNESS",
+      "label": "Fever with neck stiffness",
+      "clinical_concern": "Meningitis",
+      "all_of": ["fever", "stiff neck"],
+      "rationale": "Fever with neck stiffness may indicate meningitis and requires urgent clinician evaluation."
+    },
+    {
+      "code": "PROLONGED_FEVER",
+      "label": "Prolonged fever",
+      "clinical_concern": "Enteric fever, tuberculosis, malignancy",
+      "all_of": ["fever"],
+      "duration_exceeds_days": 7,
+      "rationale": "Fever persisting beyond one week needs clinician assessment rather than symptomatic treatment."
+    }
+  ]
+}

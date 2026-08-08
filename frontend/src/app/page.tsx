@@ -1,64 +1,92 @@
-'use client';
-
-import React from 'react';
 import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-white text-black flex flex-col justify-between p-6 sm:p-12">
-      {/* Header */}
-      <header className="max-w-4xl mx-auto w-full border-b border-neutral-200 pb-4">
-        <h1 className="text-base font-bold tracking-tight text-black">Clinical Assistant Portal</h1>
-        <p className="text-xs text-neutral-600">Multilingual Patient Triage & Physician Handoff</p>
+    <div className="flex min-h-screen flex-col bg-paper">
+      <header className="border-b border-rule">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
+          <span className="text-[15px] font-semibold tracking-tight text-ink">
+            Clinical Assistant
+          </span>
+          <span className="label-meta">Multilingual intake</span>
+        </div>
       </header>
 
-      {/* Main Container */}
-      <main className="my-auto max-w-3xl mx-auto w-full py-12 space-y-8">
-        <div className="space-y-2">
-          <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-black">
-            Clinical Intake & Review
-          </h2>
-          <p className="text-sm text-neutral-600">
-            Select a portal to continue.
-          </p>
-        </div>
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center px-6 py-20">
+        <h1 className="max-w-[18ch] text-display font-semibold text-ink">
+          A multilingual bridge between patient and doctor.
+        </h1>
 
-        {/* Portal Options */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <p className="mt-6 max-w-reading text-body leading-relaxed text-ink-muted">
+          Patients describe their symptoms in their own language. The assistant collects a
+          structured history, a deterministic safety layer classifies the case, and a doctor
+          makes every clinical decision. The AI drafts; the doctor decides.
+        </p>
+
+        <div className="mt-14 grid gap-px border border-rule bg-rule sm:grid-cols-2">
           <Link
             href="/patient"
-            className="border border-neutral-300 hover:border-black p-6 rounded-lg bg-neutral-50 transition-colors space-y-3"
+            className="group bg-surface px-6 py-8 transition-colors hover:bg-accent-soft"
           >
-            <div className="text-xs uppercase font-mono tracking-wider text-neutral-500">Portal 01</div>
-            <h3 className="text-lg font-bold text-black">Patient Intake Assistant</h3>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Describe symptoms via text or voice. Receive intake assessment and physician-approved prescription.
+            <span className="label-meta">For patients</span>
+            <h2 className="mt-3 text-heading font-semibold text-ink">Start an intake</h2>
+            <p className="mt-2 max-w-reading text-[14px] leading-relaxed text-ink-muted">
+              Speak or type in English, Hindi and six more Indian languages.
             </p>
-            <div className="text-xs font-bold text-black pt-2 underline underline-offset-4">
-              Enter Patient Portal →
-            </div>
+            <span className="mt-4 inline-block text-[13px] text-accent underline underline-offset-4">
+              Begin
+            </span>
           </Link>
 
           <Link
-            href="/doctor/login"
-            className="border border-neutral-300 hover:border-black p-6 rounded-lg bg-neutral-50 transition-colors space-y-3"
+            href="/doctor"
+            className="group bg-surface px-6 py-8 transition-colors hover:bg-accent-soft"
           >
-            <div className="text-xs uppercase font-mono tracking-wider text-neutral-500">Portal 02</div>
-            <h3 className="text-lg font-bold text-black">Physician Dashboard</h3>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Authenticated access for licensed physicians to review intake summaries, edit drafts, and approve cases.
+            <span className="label-meta">For doctors</span>
+            <h2 className="mt-3 text-heading font-semibold text-ink">Review cases</h2>
+            <p className="mt-2 max-w-reading text-[14px] leading-relaxed text-ink-muted">
+              A live queue with English summaries, safety signals and AI drafts to approve,
+              modify or reject.
             </p>
-            <div className="text-xs font-bold text-black pt-2 underline underline-offset-4">
-              Doctor Sign In →
-            </div>
+            <span className="mt-4 inline-block text-[13px] text-accent underline underline-offset-4">
+              Sign in
+            </span>
           </Link>
         </div>
+
+        <dl className="mt-16 grid gap-8 border-t border-rule pt-8 sm:grid-cols-3">
+          {[
+            {
+              term: 'Deterministic triage',
+              detail:
+                'Red flags are matched by application logic against a curated reference, not decided by a model.',
+            },
+            {
+              term: 'Doctor authority',
+              detail:
+                'No AI draft reaches a patient. Only an approved or modified prescription is final.',
+            },
+            {
+              term: 'Grounded drafting',
+              detail:
+                'Medications are retrieved from a curated formulary. The model writes rationale, never dosing.',
+            },
+          ].map((item) => (
+            <div key={item.term}>
+              <dt className="label-meta">{item.term}</dt>
+              <dd className="mt-2 text-[14px] leading-relaxed text-ink-muted">{item.detail}</dd>
+            </div>
+          ))}
+        </dl>
       </main>
 
-      {/* Footer */}
-      <footer className="max-w-4xl mx-auto w-full border-t border-neutral-200 pt-4 text-xs text-neutral-500 flex justify-between">
-        <span>Clinical Intake System</span>
-        <span>Physician Final Authority</span>
+      <footer className="border-t border-rule">
+        <div className="mx-auto max-w-4xl px-6 py-5">
+          <p className="max-w-reading text-[12px] leading-relaxed text-ink-faint">
+            Prototype for demonstration. Not a medical device and not for clinical use. In an
+            emergency, contact your local emergency services.
+          </p>
+        </div>
       </footer>
     </div>
   );

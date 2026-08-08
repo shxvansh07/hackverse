@@ -1,145 +1,221 @@
-# Multilingual AI Clinical Assistant — Team AUFBRUCH
+# Multilingual AI Clinical Assistant
 
-HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text or voice in one of 8 Indian languages**, an AI conversational engine triages them, a **deterministic safety layer** (not the LLM) decides how urgent the case is, and a **doctor dashboard** — synced in real time over WebSocket — reviews, edits, and approves everything before a patient ever sees a prescription.
+A multilingual bridge between a patient and a doctor. Patients describe symptoms in
+their own language; the assistant collects a structured clinical history; a
+**deterministic** safety layer classifies the case; and a doctor makes every clinical
+decision.
 
-## What this actually does
+**The AI drafts. The doctor decides.**
 
-**Patient side (`/patient`)**
-- Picks a language (Hindi, Kannada, Tamil, Telugu, Bengali, Marathi, Gujarati, or English) and describes symptoms — by typing, or hands-free via a full **voice call mode**: continuous speech recognition, silence-based auto-submit (Web Audio volume analysis, no push-to-talk), spoken AI replies, and a live equalizer while it listens.
-- The AI (`ai_service.py`) asks natural follow-up questions in-language, refusing anything off-topic ("only health questions"), and never re-asks for information already given.
-- Structured fields — symptoms, duration, severity, history, allergies — are extracted per turn (`triage_engine.py`), in English and Hindi/Hinglish, including Devanagari digits and 5 duration-phrase patterns.
-- A **deterministic** safety engine (`safety_engine.py`) — not the LLM — scans for 8 categories of red flags (chest pain, respiratory distress, stroke signs, infant high fever, loss of consciousness, severe bleeding, anaphylaxis, severe abdominal pain) in English *and* Hindi/Hinglish, and classifies the case `LOW_RISK` / `UNCERTAIN` / `URGENT`. This runs independent of the LLM's own judgment on purpose — a bad LLM generation can't silently downgrade an emergency.
-- `URGENT` → an emergency appointment is **auto-booked** immediately, in-language, no doctor action needed to reserve the slot.
-- Otherwise, once intake is complete (or the patient says "no"/"nahi" to more questions), a **RAG-grounded draft prescription** is generated (`rag_engine.py`) from a small curated formulary (fever, cold, acidity, headache, diarrhea — each with ICD-10 code, medications, and care instructions) matched by keyword relevance.
-- The patient then polls for the doctor's decision; once `APPROVED`/`MODIFIED`, the **canonical, doctor-approved** prescription renders — patient can switch the display language (`translation.py` translates frequency/instructions phrasing per language while **preserving medication name, dosage, and duration exactly** — translation never touches the clinical content).
+---
 
-**Doctor side (`/doctor`, gated behind `/doctor/login`)**
-- Demo login (`doctor` / `doctorpassword123`, shown right on the form — see *Known limitations*).
-- Case queue with live metrics (total / low-risk / urgent / pending), filterable by risk level, updated **in real time via WebSocket** the moment a patient submits — no polling, no manual refresh needed.
-- Case detail: English clinical summary, red flags, editable AI-drafted medication rows (add/remove/edit inline).
-- Five decisions, not three: **Approve**, **Modify & Approve**, **Reject**, plus two the base PRD didn't have — **Refer to Specialist** (8 specialties) and **Schedule In-Person Appointment** (clinic + time slot) — both generate their own record type (`ReferralInfo` / `Appointment`) attached to the case.
+## The safety model
+
+This is not an autonomous diagnosis or prescribing system, and the architecture is
+built so that it cannot drift into becoming one.
+
+| Rule | Where it is enforced |
+|---|---|
+| URGENT cases never enter the prescription workflow | `safety/guards.py::may_generate_draft` |
+| UNCERTAIN cases never bypass doctor review | `safety/guards.py::may_generate_draft` |
+| No AI draft ever reaches a patient | `safety/guards.py::may_release_to_patient`, enforced at the API boundary |
+| A rejected draft is never shown as a prescription | same guard, `REJECTED_BY_DOCTOR` |
+| Translation cannot alter clinical content | `safety/guards.py::verify_translation` + `verify_medication_preserved` |
+| A drafted drug never collides with a documented allergy | `safety/guards.py::check_allergy_conflict` |
+| Symptoms, duration and history are never invented | additive-only merge in `services/triage_service.py` |
+
+### The LLM has exactly one influence on routing, and it is one-directional
+
+The model may flag a possible red flag it noticed. That hint can **raise** concern
+(pushing a case to UNCERTAIN) but there is no code path by which any model output
+marks a case safe or clears an escalation. Triage state is set only by
+`safety/engine.py`, which imports no AI code and makes no network calls.
+
+```
+patient message
+      ↓
+LLM structured extraction  ── validated against a Pydantic schema; invalid output discarded
+      ↓
+additive merge into case state  ── a later turn can never blank an earlier disclosure
+      ↓
+DETERMINISTIC safety assessment  ── sole authority on LOW_RISK / UNCERTAIN / URGENT
+      ↓
+     ┌──────────────┬──────────────────┬─────────────────┐
+   URGENT        UNCERTAIN          LOW_RISK
+   escalate,     doctor review,     RAG-grounded draft
+   no draft      no draft           → allergy check → doctor
+```
+
+### Where medications actually come from
+
+Drugs, doses, frequencies and durations are copied **verbatim** from
+`knowledge/formulary.json`. The LLM writes the rationale prose and nothing else. A
+model cannot introduce a medication a human did not put in that file. If no protocol
+matches, the draft is deliberately empty and the doctor prescribes from scratch.
+
+---
+
+## Running it
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # add your NVIDIA NIM key
+uvicorn app.main:app --reload --port 8000
+```
+
+Open <http://127.0.0.1:8000/docs> for the API, or `/api/health` to confirm which LLM
+providers and knowledge files loaded.
+
+**It runs with no API keys at all.** Intake falls back to a deterministic multilingual
+question bank, and the safety engine is unaffected — which is also how the test suite
+runs.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:3000
+```
+
+### Tests
+
+```bash
+cd backend
+PERSIST_STATE=0 SEED_DEMO_DATA=0 pytest -q      # 67 tests
+```
+
+`tests/test_safety.py` asserts the invariants above directly.
+`tests/test_workflow.py` drives them through the real HTTP API.
+
+---
+
+## Demo script
+
+1. Open `/patient`, choose **हिन्दी**.
+2. Type or speak: `Mujhe 3 din se fever hai aur body pain bhi hai`.
+3. The assistant replies in Hindi and asks only for what is still missing. The
+   "Recorded so far" panel fills in as it learns.
+4. Answer the allergy question, then say `nahi` — intake completes and hands off.
+5. In another window, `/doctor` → sign in → the case **appears without a refresh**.
+6. Review the English summary, safety signals, and the draft under its
+   **AI-GENERATED DRAFT** banner.
+7. **Modify** a dose and release, or **Approve** as-is.
+8. Back on the patient window, the prescription appears. Switch language — the
+   medicine name, dose and duration are byte-identical; only the surrounding words
+   change.
+
+To demonstrate escalation, start a fresh session and say
+`I have severe chest pain and cannot breathe`. The case is classified URGENT, the
+patient is told to seek emergency care, and **no prescription is generated** — the
+doctor queue shows it top of the list with "No draft".
+
+---
 
 ## Architecture
 
 ```
-                         PATIENT                                    DOCTOR
-                            │                                          │
-                            ▼                                          ▼
-                 Next.js Patient Portal                     Next.js Doctor Portal
-              (voice call, 8-language chat)                (login, live queue, review)
-                            │                                          │
-                            │ REST                          REST + WebSocket (live push)
-                            ▼                                          ▼
-                 ┌────────────────────┐                    ┌────────────────────┐
-                 │ routers/patient.py │                    │  routers/doctor.py │
-                 └──────────┬─────────┘                    └──────────┬─────────┘
-                            │                                          │
-              ┌─────────────┼─────────────┐                            │
-              ▼             ▼             ▼                            │
-      triage_engine   safety_engine  ai_service                        │
-      (structured      (deterministic  (Gemini→Groq→OpenAI→            │
-       extraction)      red flags)      DeepSeek→NVIDIA→rules)         │
-              │             │                                          │
-              └──────┬──────┘                                          │
-                     ▼                                                 │
-              rag_engine.py  ◄─────────────────────────────────────────┘
-           (formulary-grounded draft,          (also called if a doctor opens
-            called on intake completion)        a case with no draft yet)
-                     │                                                 │
-                     ▼                                                 ▼
-         ┌─────────────────────────────────────────────────────────────┐
-         │           shared/database.py — shared in-memory store         │
-         │   sessions · cases · prescriptions · appointments             │
-         │              + ConnectionManager (WebSocket broadcast)        │
-         └─────────────────────────────────────────────────────────────┘
-                     │
-                     ▼
-             translation.py
-     (patient-language prescription view — never mutates clinical content)
+knowledge/                  Curated clinical data, reviewable without reading code
+  formulary.json            Drugs, doses, contraindications per protocol
+  red_flags.json            THE authority on URGENT classification
+  clinical_guidance.json    Retrievable grounding passages
+  icd10.json                Code reference
+
+backend/app/
+  ai/                       Provider abstraction. NVIDIA NIM primary, 4 fallbacks
+    base.py                 LLMProvider interface
+    providers.py            Vendor adapters
+    schemas.py              Pydantic schemas for every structured model output
+    prompts.py              Prompt construction
+    service.py              Fallback chain + validation
+  safety/                   Deterministic. Imports no AI code.
+    engine.py               Triage classification
+    guards.py               The four enforcement points
+  rag/
+    vector_store.py         Hand-rolled TF-IDF + cosine, zero dependencies
+    engine.py               Retrieval and draft assembly
+  services/                 Orchestration
+  websocket/manager.py      Doctor queue fan-out
+  patient_backend/router.py Patient endpoints
+  doctor_backend/router.py  Doctor endpoints (all authenticated)
+  shared/                   Models, store, auth, languages, knowledge loader
+
+frontend/src/
+  app/patient/              Mobile-first intake, speech I/O, prescription view
+  app/doctor/               Desktop-first queue and review
+  components/ui/clinical    Shared primitives (RiskBadge, AiDraftBanner…)
+  lib/api.ts                Typed client
+  lib/speech.ts             Web Speech API wrapper
 ```
 
-`main.py` is a thin app factory that just wires `patient_backend.router` and `doctor_backend.router` together — both import the *same* in-memory `db` and `ws_manager` singletons from `shared/database.py`, which is exactly how a doctor's decision instantly reaches the patient's next poll and the doctor queue's WebSocket push. That in-memory store has to stay a single process — it's why this is one backend app with two router folders, not two separate backend services.
+### Why no vector database
 
-## Tech stack (as actually used, not aspirational)
+The corpus is a few dozen curated passages. TF-IDF with cosine similarity in ~120
+lines of pure Python is numerically identical to what a library would produce at this
+size, with no dependency or infrastructure cost. `VectorStore` exposes `add`/`search`,
+so swapping in pgvector later is a change behind one file.
 
-| Layer | Technology |
-|---|---|
-| Patient + Doctor Web App | Next.js 14 (App Router) · TypeScript · Tailwind CSS · Framer Motion · Lucide icons |
-| API | FastAPI · Pydantic v2 · native `WebSocket` support |
-| AI conversation | Cascading fallback: Gemini → Groq (Llama 3.3 70B) → OpenAI (gpt-4o-mini) → DeepSeek → NVIDIA NIM → rule-based per-language question bank (works with **zero** API keys configured) |
-| Safety triage | Deterministic keyword/regex engine, independent of the LLM |
-| RAG | Curated in-code clinical formulary, keyword-relevance matched (no vector DB — appropriately simple for a 36h MVP) |
-| Data store | In-memory (`InMemoryDB`) — resets on backend restart, seeded with 2 demo cases on boot |
-| Real-time sync | Native WebSocket broadcast (`/api/ws/doctor`) |
-| Voice | Browser-native Web Speech API (`SpeechRecognition` + `SpeechSynthesis`) + Web Audio API for voice-activity detection — no external speech service |
+### Why JSON persistence rather than an ORM
 
-## Repo layout & 4-way ownership
+Four entity types, no query requirements beyond get-by-id and list-all. A dict plus an
+atomic snapshot gives restart durability without a schema or migrations. All writes go
+through `ClinicalStore`, so moving to SQLAlchemy is contained to that file. Doctor
+decisions additionally append to an immutable JSONL audit log.
 
-Four folders, one for each part. `patient_backend/` and `doctor_backend/` use underscores, not hyphens — Python's `import` syntax doesn't allow hyphens in package names, so `patient-backend` isn't a valid importable folder name. The frontend route folders (`app/patient/`, `app/doctor/`) keep their existing names since they're also the live URL paths (`/patient`, `/doctor`) — renaming them would break every link and bookmark to the app.
+---
 
-```
-backend/
-  app/
-    main.py                  — thin app factory: imports both routers, wires them onto one FastAPI app
-    shared/                  ← used by both backend parts, not owned by either
-      models.py               (Pydantic schemas — TriageCase, Prescription, etc.)
-      database.py              (in-memory store + WebSocket ConnectionManager)
-    patient_backend/         ← Patient Backend folder
-      router.py                (session, triage chat, prescription GET, appointment booking)
-      ai_service.py            (LLM cascade: Gemini → Groq → OpenAI → DeepSeek → NVIDIA → rules)
-      triage_engine.py         (structured field extraction)
-      safety_engine.py         (deterministic red-flag rules)
-      rag_engine.py            (formulary-grounded draft — doctor_backend also calls this)
-      translation.py           (prescription language view)
-    doctor_backend/          ← Doctor Backend folder
-      router.py                (auth, WebSocket, case queue, decisions)
-  tests/test_backend.py       (safety, RAG, translation unit tests — run with `python -m unittest`)
+## API
 
-frontend/
-  src/app/
-    page.tsx                   (landing — links to both portals)
-    patient/page.tsx          ← Patient Frontend  (chat + voice call + prescription view)
-    doctor/login/page.tsx     ← Doctor Frontend
-    doctor/page.tsx            ← Doctor Frontend  (queue + case review + decisions)
-  src/lib/api.ts               (shared typed client both portals import)
-```
-
-| Part | Folder | Consumes from `shared/` |
+| Method | Path | Notes |
 |---|---|---|
-| **Patient Frontend** | `frontend/src/app/patient/` + landing page | `lib/api.ts` |
-| **Patient Backend** | `backend/app/patient_backend/` | `shared/models.py`, `shared/database.py` |
-| **Doctor Frontend** | `frontend/src/app/doctor/` | `lib/api.ts` |
-| **Doctor Backend** | `backend/app/doctor_backend/` | `shared/models.py`, `shared/database.py`, `patient_backend/rag_engine.py` (lazy-draft fallback when a doctor opens a case with no draft yet) |
+| GET | `/api/languages` | Language menu with Web Speech tags |
+| POST | `/api/patient/session` | Start intake |
+| POST | `/api/triage/message` | Send a message, get reply + updated state |
+| POST | `/api/triage/assess` | Final safety assessment; drafts only if permitted |
+| GET | `/api/triage/{session_id}` | Current structured state |
+| POST | `/api/cases` | Hand off to the doctor queue |
+| GET | `/api/patient/status/{session_id}` | Polled by the waiting screen |
+| GET | `/api/prescriptions/{id}?lang=` | **Release gate.** 409 unless doctor-finalised |
+| POST | `/api/auth/doctor/login` | |
+| WS | `/api/ws/doctor?token=` | Live queue |
+| GET | `/api/doctor/cases` | Queue, URGENT first |
+| GET | `/api/doctor/cases/{id}` | Full detail incl. draft and audit |
+| POST | `/api/doctor/cases/{id}/decision` | APPROVE / MODIFY / REJECT / NEEDS_REVIEW |
+| PATCH | `/api/prescriptions/{id}` | Amend a finalised prescription |
+| GET | `/api/doctor/audit/{case_id}` | Decision trail |
 
-`shared/models.py` and `shared/database.py` are intentionally shared, not duplicated per folder — both backend parts operate on the same `TriageCase`/`Prescription` records and the same in-memory store (and the same process, since the WebSocket broadcast and in-memory DB only work as one running server). Duplicating them would mean two copies of the same data silently going out of sync. Each of the 4 folders above is otherwise fully independent — one person's PR only ever touches their own folder, so there's no file-level collision between the 4 of you.
+All doctor routes require `Authorization: Bearer <token>`.
 
-## Setup & run
+---
 
-**Backend**
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # add at least one LLM key, or leave blank to use the rule-based fallback
-uvicorn app.main:app --reload --port 8000
-```
-Run tests: `python -m unittest tests.test_backend -v`
+## Languages
 
-**Frontend**
-```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:3000
-```
-Set `NEXT_PUBLIC_API_URL` (defaults to `http://127.0.0.1:8000`) if the backend runs elsewhere.
+English and Hindi are the guaranteed MVP pair. Bengali, Marathi, Tamil, Telugu,
+Gujarati and Kannada run through the identical code path. Adding another is one entry
+in `shared/languages.py` plus its column in the fallback question bank — no engine
+changes.
 
-**Try it**
-- Patient: http://localhost:3000/patient
-- Doctor: http://localhost:3000/doctor/login → `doctor` / `doctorpassword123`
+---
 
-## Known limitations (hackathon MVP, by design)
+## Known limitations
 
-- **No persistence** — the in-memory store resets every backend restart. Two demo cases (`CASE-DEMO-01` low-risk, `CASE-DEMO-02` urgent) are re-seeded on boot so the doctor queue is never empty.
-- **Demo-only doctor auth** — hardcoded username/password shown directly on the login form, no hashing, wide-open `CORS allow_origins=["*"]`. Fine for a judged demo on localhost; would need real auth, a real DB, and locked-down CORS before any real deployment.
-- **LLM keys optional but recommended** — without at least one of `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `NVIDIA_API_KEY` in `.env`, conversation falls back to a fixed per-language question sequence (still fully functional, just not adaptive).
-- **RAG formulary is intentionally small** (5 conditions) — a real deployment needs a reviewed, larger clinical knowledge base.
+- **Authentication is demo-grade.** Env-var credentials and in-memory tokens. Replace
+  with a real identity provider before any real use.
+- **Red-flag matching is lexical.** Phrase matching plus a bounded-proximity token
+  match. It errs toward over-detection on purpose, but it is not semantic and will
+  miss unusual phrasings.
+- **The formulary is illustrative**, curated for demonstration and not clinically
+  validated. Six protocols covering common self-limiting presentations.
+- **Translation is verified, not guaranteed.** Numeric drift is caught and falls back
+  to English; nuance loss within unchanged numbers would not be.
+
+## Not built, by design
+
+Autonomous diagnosis or prescribing · doctor replacement · emergency response · EMR ·
+FHIR/HL7 · microservices.
+
+> Prototype for demonstration. Not a medical device and not for clinical use.
