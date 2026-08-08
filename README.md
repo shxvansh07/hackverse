@@ -41,6 +41,8 @@ A second classification, deliberately kept separate from `RiskState` (`LOW_RISK`
 
 Why this exists as a second axis instead of overloading `RiskState`: `RiskState` is specifically the deterministic red-flag safety net (a fixed list of dangerous phrases) — expanding what counts as "urgent" there risks diluting a list that's supposed to be a small, high-precision set of genuine emergencies. `SeverityLevel` handles the softer, more common case — a patient who isn't describing an emergency phrase but is still telling you, in their own words, that this feels serious — without touching that list. The self-report path only ever *skips a prescription draft and suggests booking*; it never auto-books or triggers emergency-room language, since it hasn't been verified against the red-flag patterns the way a true `URGENT` case has.
 
+**Specialist recommendation** (`recommend_specialty()`, `safety_engine.py`) is layered on top of both SEVERE paths — a red flag maps to a specific specialty (chest pain → Cardiology, stroke signs → Neurology, etc.), falling back to "General Physician / Internal Medicine" when nothing maps cleanly (which is what the self-report-only path always gets, since it hasn't matched a specific red-flag category). Shown to the patient in both the emergency banner and the appointment-recommended card, and passed through to `book_appointment()` so the booked slot records which specialty it's for.
+
 ## Architecture
 
 ```
