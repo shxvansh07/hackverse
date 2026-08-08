@@ -26,14 +26,20 @@ class AIService:
         patient_message: str,
         history: List[Dict[str, str]],
         lang: str = "hi",
-        known_facts: Dict[str, Any] = {},
-        missing_info: List[str] = [],
-        previous_ai_texts: List[str] = []
+        known_facts: Dict[str, Any] = None,
+        missing_info: List[str] = None,
+        previous_ai_texts: List[str] = None
     ) -> str:
         """
         Generates natural conversational AI responses with ZERO restrictions.
         Can talk about health, general topics, trivia, or anything the user wants.
         """
+        if known_facts is None:
+            known_facts = {}
+        if missing_info is None:
+            missing_info = []
+        if previous_ai_texts is None:
+            previous_ai_texts = []
         symptoms_known = ", ".join(known_facts.get("symptoms", [])) or "Not specified yet"
         duration_known = known_facts.get("duration", "") or "Not specified yet"
         severity_known = known_facts.get("severity", "") or "Not specified yet"
