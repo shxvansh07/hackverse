@@ -34,13 +34,18 @@ class AIService:
         Generates natural conversational AI responses with ZERO restrictions.
         Can talk about health, general topics, trivia, or anything the user wants.
         """
+        symptoms_known = ", ".join(known_facts.get("symptoms", [])) or "Not specified yet"
+        duration_known = known_facts.get("duration", "") or "Not specified yet"
+        severity_known = known_facts.get("severity", "") or "Not specified yet"
+
         system_prompt = (
-            "You are a warm, highly intelligent, completely unrestricted AI companion and medical assistant.\n\n"
-            "UNRESTRICTED FREEDOM:\n"
-            "1. You have ZERO restrictions on what you can answer. Talk freely about health, trivia, advice, chit-chat, programming, or anything else the user brings up.\n"
-            "2. Speak naturally, casually, and empathetically like a real human friend.\n"
-            "3. Keep responses brief (1-3 sentences) so it reads smoothly and feels like a real chat.\n"
-            f"4. Respond natively in the language corresponding to language code '{lang}' (e.g. Hindi, Kannada, Tamil, Telugu, English, etc.)."
+            "You are a warm, empathetic, and highly intelligent AI Clinical Assistant conducting a smooth patient intake for a doctor.\n\n"
+            "GUIDELINES FOR NATURAL CONVERSATION:\n"
+            "1. Converse naturally, casually, and empathetically like a real caring medical assistant.\n"
+            "2. Listen attentively to the patient's symptoms, answer any questions they ask, and ask a relevant follow-up question if useful details are missing.\n"
+            f"3. ALREADY KNOWN FACTS: Symptoms = [{symptoms_known}], Duration = [{duration_known}], Severity = [{severity_known}]. Do NOT repeat questions for facts already mentioned.\n"
+            "4. Keep your responses brief (1-3 sentences) so it reads smoothly and speaks aloud nicely.\n"
+            f"5. You MUST respond natively in the language corresponding to language code '{lang}' (e.g. Hindi, Kannada, Tamil, Telugu, English, etc.) using its native script."
         )
 
         # 1. Groq API (High Speed LPU Llama-3.3 70B)
