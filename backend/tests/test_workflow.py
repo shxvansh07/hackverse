@@ -452,6 +452,51 @@ def test_questions_are_not_repeated():
     assert len(set(replies)) == len(replies)
 
 
+def test_intake_completes_with_zero_llm_providers():
+    """Regression test for a real bug: without an LLM, extraction never ran,
+    so symptoms/duration (both required) could never leave
+    missing_information and intake could never complete — the fallback
+    question bank would cycle through every question once and then repeat
+    "anything else?" forever. The very first patient answer was also being
+    silently dropped, because the greeting wasn't recognised as implicitly
+    asking about symptoms.
+
+    This reproduces exactly the reported sequence (symptom, duration, then a
+    run of "no" answers) and asserts it actually completes."""
+    session_id = start_session("en")
+
+    first = send(session_id, "i have a strong headache")
+    assert first["is_complete"] is False
+
+    second = send(session_id, "2 days")
+    assert second["is_complete"] is False
+
+    # Enough "no" answers to clear every remaining tracked question — must
+    # terminate, not loop indefinitely repeating the same question.
+    result = None
+    for _ in range(6):
+        result = send(session_id, "no")
+        if result["is_complete"]:
+            break
+
+    assert result is not None and result["is_complete"] is True
+
+    case = db.get_case(result["case_id"])
+    assert case.symptoms, "symptoms should have been captured from the raw answer"
+    assert case.duration, "duration should have been captured from the raw answer"
+
+
+def test_first_patient_answer_is_not_dropped():
+    """The greeting implicitly asks about symptoms; a patient's very first
+    reply must be captured, not silently discarded while the bot re-asks the
+    same question."""
+    session_id = start_session("en")
+    send(session_id, "i have a headache")
+
+    case = db.get_case_by_session(session_id)
+    assert case.symptoms == ["i have a headache"]
+
+
 def test_empty_message_rejected():
     session_id = start_session("en")
     resp = client.post("/api/triage/message", json={"session_id": session_id, "message": "   "})
