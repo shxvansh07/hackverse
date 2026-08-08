@@ -55,6 +55,7 @@ def _complete_case(**overrides):
         "my face is drooping and speech is slurred",
         "he fainted this morning",
         "I am vomiting blood",
+        "I have blood in my saliva",
         "my lips are swelling and throat closing",
     ],
 )

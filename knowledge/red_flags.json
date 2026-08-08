@@ -62,8 +62,9 @@
       "patterns": [
         "uncontrolled bleeding", "coughing blood", "vomiting blood", "blood in vomit",
         "blood in stool", "black tarry stool", "heavy bleeding",
-        "khoon ki ulti", "khoon beh raha", "khoon aa raha",
-        "खून की उल्टी", "खून बह रहा", "खून आ रहा"
+        "blood in saliva", "blood in spit", "blood in sputum", "blood while spitting",
+        "khoon ki ulti", "khoon beh raha", "khoon aa raha", "khoon thook mein", "thook mein khoon",
+        "खून की उल्टी", "खून बह रहा", "खून आ रहा", "थूक में खून"
       ]
     },
     {
