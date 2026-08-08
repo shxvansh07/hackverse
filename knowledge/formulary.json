@@ -1,0 +1,223 @@
+{
+  "_meta": {
+    "name": "Curated Clinical Formulary",
+    "version": "1.0.0",
+    "scope": "Hackathon MVP. Common self-limiting primary-care presentations only.",
+    "disclaimer": "This formulary grounds AI DRAFT generation only. It is never authorization to prescribe. Every entry requires doctor review before reaching a patient.",
+    "review_status": "Curated for demonstration. NOT clinically validated for real patient use."
+  },
+  "protocols": [
+    {
+      "id": "PROTO-FEVER-VIRAL",
+      "icd10": "R50.9",
+      "condition": "Fever, unspecified / Acute viral syndrome",
+      "presentation": "Fever with generalized body ache, chills, malaise and headache. No localizing or red-flag features.",
+      "keywords": [
+        "fever", "bukhar", "बुखार", "temperature", "feverish", "chills", "thand lag rahi",
+        "body ache", "body pain", "badan dard", "बदन दर्द", "अंगों में दर्द", "myalgia",
+        "malaise", "weakness", "kamzori", "कमजोरी", "viral", "flu"
+      ],
+      "medications": [
+        {
+          "name": "Paracetamol (Acetaminophen)",
+          "dosage": "500 mg",
+          "frequency": "Every 6 to 8 hours as needed",
+          "duration": "3-5 days",
+          "instructions": "Take with water after food. Do not exceed 4,000 mg in 24 hours.",
+          "drug_class": "analgesic_antipyretic",
+          "contraindicated_allergies": ["paracetamol", "acetaminophen"],
+          "cautions": ["severe hepatic impairment", "chronic alcohol use"]
+        }
+      ],
+      "instructions": "Maintain oral hydration with water and ORS. Avoid heavy physical exertion. Seek doctor care if fever exceeds 102 F, persists beyond 4 days, or new symptoms appear.",
+      "escalate_if": [
+        "fever above 104 F",
+        "fever with rash",
+        "fever with neck stiffness",
+        "fever in an infant under 3 months",
+        "fever persisting beyond 7 days"
+      ]
+    },
+    {
+      "id": "PROTO-URTI",
+      "icd10": "J00",
+      "condition": "Acute nasopharyngitis (common cold)",
+      "presentation": "Runny nose, sneezing, mild sore throat and non-productive cough without fever or respiratory distress.",
+      "keywords": [
+        "cold", "runny nose", "sneeze", "sneezing", "chink", "जुकाम", "छींक", "nazla",
+        "sore throat", "gala dard", "गले में खराश", "throat pain", "khich khich",
+        "cough", "khansi", "खांसी", "blocked nose", "nak band"
+      ],
+      "medications": [
+        {
+          "name": "Cetirizine Hydrochloride",
+          "dosage": "10 mg",
+          "frequency": "Once daily at bedtime",
+          "duration": "5 days",
+          "instructions": "May cause drowsiness. Avoid driving or operating machinery after taking.",
+          "drug_class": "antihistamine",
+          "contraindicated_allergies": ["cetirizine", "hydroxyzine", "antihistamine"],
+          "cautions": ["renal impairment", "elderly patients"]
+        },
+        {
+          "name": "Warm Saline Gargle and Steam Inhalation",
+          "dosage": "Non-pharmacological",
+          "frequency": "2-3 times daily",
+          "duration": "5-7 days",
+          "instructions": "Inhale warm steam for 5-10 minutes and gargle with warm salt water.",
+          "drug_class": "non_pharmacological",
+          "contraindicated_allergies": [],
+          "cautions": []
+        }
+      ],
+      "instructions": "Drink warm liquids and rest. Monitor for breathing difficulty, chest tightness or high fever.",
+      "escalate_if": [
+        "breathing difficulty",
+        "chest tightness",
+        "coughing blood",
+        "symptoms persisting beyond 10 days"
+      ]
+    },
+    {
+      "id": "PROTO-GERD",
+      "icd10": "K21.9",
+      "condition": "Gastro-oesophageal reflux disease without oesophagitis / Dyspepsia",
+      "presentation": "Burning retrosternal or epigastric discomfort, sour eructation, worse after meals or lying flat.",
+      "keywords": [
+        "acidity", "heartburn", "acid reflux", "stomach burn", "pet me jalan", "पेट में जलन",
+        "gas", "bloating", "indigestion", "sour burps", "khatti dakar", "खट्टी डकार",
+        "burning chest after food", "seene me jalan"
+      ],
+      "medications": [
+        {
+          "name": "Pantoprazole",
+          "dosage": "40 mg",
+          "frequency": "Once daily",
+          "duration": "7 days",
+          "instructions": "Take 30 minutes before breakfast on an empty stomach with plain water.",
+          "drug_class": "proton_pump_inhibitor",
+          "contraindicated_allergies": ["pantoprazole", "omeprazole", "proton pump inhibitor", "ppi"],
+          "cautions": ["long-term use", "hepatic impairment"]
+        },
+        {
+          "name": "Antacid Oral Gel (Magaldrate with Simethicone)",
+          "dosage": "10 ml",
+          "frequency": "As needed after meals",
+          "duration": "5 days",
+          "instructions": "Shake well before use. Take 1-2 teaspoons when experiencing acid burn.",
+          "drug_class": "antacid",
+          "contraindicated_allergies": ["magaldrate", "simethicone", "antacid"],
+          "cautions": ["renal impairment"]
+        }
+      ],
+      "instructions": "Avoid spicy, oily and fried food. Eat small frequent meals. Do not lie down for 2 hours after eating. Elevate the head of the bed.",
+      "escalate_if": [
+        "chest pain radiating to arm or jaw",
+        "difficulty swallowing",
+        "vomiting blood",
+        "black tarry stools",
+        "unintentional weight loss"
+      ]
+    },
+    {
+      "id": "PROTO-TENSION-HEADACHE",
+      "icd10": "G44.2",
+      "condition": "Tension-type headache",
+      "presentation": "Bilateral, band-like, pressing head pain of mild to moderate intensity without neurological deficit.",
+      "keywords": [
+        "headache", "head pain", "sir dard", "sar dard", "सिरदर्द", "सर दर्द",
+        "tension headache", "stress headache", "band like pain", "pressure in head"
+      ],
+      "medications": [
+        {
+          "name": "Paracetamol",
+          "dosage": "500 mg",
+          "frequency": "Twice daily as needed",
+          "duration": "3 days",
+          "instructions": "Take after light food with water. Maintain hydration.",
+          "drug_class": "analgesic_antipyretic",
+          "contraindicated_allergies": ["paracetamol", "acetaminophen"],
+          "cautions": ["severe hepatic impairment", "medication overuse headache"]
+        }
+      ],
+      "instructions": "Ensure adequate rest and hydration of 2-3 litres per day. Reduce screen exposure and take regular breaks.",
+      "escalate_if": [
+        "sudden severe thunderclap headache",
+        "headache with fever and neck stiffness",
+        "headache with visual loss",
+        "headache with weakness or slurred speech",
+        "headache after head injury"
+      ]
+    },
+    {
+      "id": "PROTO-DIARRHOEA",
+      "icd10": "K59.1",
+      "condition": "Functional diarrhoea / Mild acute gastroenteritis",
+      "presentation": "Loose stools without blood, without high fever and without signs of significant dehydration.",
+      "keywords": [
+        "diarrhea", "diarrhoea", "loose motion", "loose motions", "dast", "दस्त",
+        "loose stool", "stomach upset", "pet kharab", "पेट खराब", "watery stools"
+      ],
+      "medications": [
+        {
+          "name": "Oral Rehydration Salts (ORS)",
+          "dosage": "1 sachet in 1 litre of water",
+          "frequency": "Sip continuously through the day",
+          "duration": "3 days",
+          "instructions": "Dissolve one sachet completely in 1 litre of clean drinking water. Drink after every loose motion.",
+          "drug_class": "rehydration",
+          "contraindicated_allergies": [],
+          "cautions": ["renal failure", "intestinal obstruction"]
+        },
+        {
+          "name": "Probiotic Spores (Bacillus clausii)",
+          "dosage": "5 ml mini-bottle",
+          "frequency": "Twice daily",
+          "duration": "5 days",
+          "instructions": "Drink directly or dilute in a small amount of water.",
+          "drug_class": "probiotic",
+          "contraindicated_allergies": ["probiotic"],
+          "cautions": ["immunocompromised patients", "central venous catheter in situ"]
+        }
+      ],
+      "instructions": "Eat a light bland diet such as banana, rice and yoghurt. Avoid milk, greasy and fried food. Watch for signs of dehydration.",
+      "escalate_if": [
+        "blood in stool",
+        "vomiting blood",
+        "signs of severe dehydration",
+        "high fever with diarrhoea",
+        "diarrhoea beyond 5 days",
+        "diarrhoea in an infant"
+      ]
+    },
+    {
+      "id": "PROTO-ALLERGIC-RHINITIS",
+      "icd10": "J30.9",
+      "condition": "Allergic rhinitis, unspecified",
+      "presentation": "Recurrent sneezing, itchy watery eyes and clear nasal discharge, often seasonal or exposure related.",
+      "keywords": [
+        "allergic rhinitis", "itchy eyes", "watery eyes", "continuous sneezing",
+        "dust allergy", "pollen", "aankh me khujli", "आँखों में खुजली", "chhink aana"
+      ],
+      "medications": [
+        {
+          "name": "Levocetirizine",
+          "dosage": "5 mg",
+          "frequency": "Once daily at bedtime",
+          "duration": "5-7 days",
+          "instructions": "Take at night. May cause mild drowsiness.",
+          "drug_class": "antihistamine",
+          "contraindicated_allergies": ["levocetirizine", "cetirizine", "antihistamine"],
+          "cautions": ["renal impairment", "elderly patients"]
+        }
+      ],
+      "instructions": "Identify and avoid the trigger where possible. Use a mask in dusty environments. Rinse nasal passages with saline.",
+      "escalate_if": [
+        "wheezing",
+        "breathing difficulty",
+        "swelling of lips or tongue",
+        "throat tightness"
+      ]
+    }
+  ]
+}

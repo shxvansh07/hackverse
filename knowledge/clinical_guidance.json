@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "name": "Approved Clinical Guidance Passages",
+    "version": "1.0.0",
+    "purpose": "Retrievable grounding passages for AI draft rationale. Retrieval provides context only and never authorizes a prescription.",
+    "review_status": "Curated for demonstration. NOT clinically validated for real patient use."
+  },
+  "passages": [
+    {
+      "id": "GUID-001",
+      "topic": "Symptomatic management of uncomplicated fever",
+      "icd10": "R50.9",
+      "text": "Uncomplicated fever in an adult without red-flag features is managed symptomatically. Paracetamol is first line at 500-1000 mg every 6-8 hours with a ceiling of 4 g per 24 hours. Antibiotics are not indicated for suspected viral syndromes. Hydration and rest are central. Reassess if fever exceeds 4 days or new localizing features appear."
+    },
+    {
+      "id": "GUID-002",
+      "topic": "Antibiotic stewardship in upper respiratory infection",
+      "icd10": "J00",
+      "text": "Most acute upper respiratory tract infections are viral and self-limiting within 7-10 days. Antibiotics offer no benefit and drive resistance. Management is supportive: hydration, steam inhalation, saline gargles, and an antihistamine where rhinorrhoea is prominent. Escalate if breathing difficulty, chest pain or persistent high fever develops."
+    },
+    {
+      "id": "GUID-003",
+      "topic": "Distinguishing reflux from cardiac chest pain",
+      "icd10": "K21.9",
+      "text": "Burning epigastric or retrosternal discomfort related to meals and posture suggests reflux. However chest pain that is exertional, crushing, radiates to the arm or jaw, or is accompanied by sweating or breathlessness must be treated as possible cardiac ischaemia and escalated immediately. When the distinction is unclear, escalate rather than treat as reflux."
+    },
+    {
+      "id": "GUID-004",
+      "topic": "Red flags in headache assessment",
+      "icd10": "G44.2",
+      "text": "Tension-type headache is bilateral, pressing and of mild to moderate intensity without neurological signs. Red flags requiring urgent evaluation include sudden thunderclap onset, headache with fever and neck stiffness, new focal neurological deficit, visual loss, headache after head trauma, and headache that is progressively worsening. Simple analgesia is appropriate only when red flags are absent."
+    },
+    {
+      "id": "GUID-005",
+      "topic": "Oral rehydration in acute diarrhoea",
+      "icd10": "K59.1",
+      "text": "Oral rehydration solution is the cornerstone of managing acute non-bloody diarrhoea. One sachet is dissolved in one litre of clean water and sipped continuously, with additional intake after each loose stool. Antimotility agents are avoided in bloody diarrhoea or fever. Escalate for blood in stool, persistent vomiting, high fever, or signs of significant dehydration."
+    },
+    {
+      "id": "GUID-006",
+      "topic": "Allergy documentation before prescribing",
+      "icd10": "Z88.9",
+      "text": "A documented drug allergy must be cross-checked against every proposed medication and its drug class before a prescription is issued. Where an allergy overlaps with a proposed agent or its class, the draft must be withheld and the case escalated to a clinician for an alternative. Cross-reactivity within a drug class is assumed unless a clinician documents otherwise."
+    },
+    {
+      "id": "GUID-007",
+      "topic": "Limits of remote symptomatic assessment",
+      "icd10": "Z71.9",
+      "text": "Remote text or voice intake cannot substitute for physical examination. Where the history is internally inconsistent, where essential information is missing, or where symptom severity is disproportionate to the reported condition, the appropriate action is escalation to a clinician rather than issuing symptomatic treatment."
+    },
+    {
+      "id": "GUID-008",
+      "topic": "Antihistamine counselling",
+      "icd10": "J30.9",
+      "text": "Sedating and partially sedating antihistamines such as cetirizine and levocetirizine are taken at bedtime to limit daytime drowsiness. Patients must be counselled to avoid driving and operating machinery. Dose reduction is required in renal impairment and in elderly patients."
+    }
+  ]
+}

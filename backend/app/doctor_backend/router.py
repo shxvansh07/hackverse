@@ -1,180 +1,239 @@
-"""Doctor-facing endpoints: authentication, real-time case queue (WebSocket),
-case review, and clinical decisions (approve/modify/reject/refer/offline
-appointment). Owned by the Doctor Backend part of the team.
+"""Doctor-facing endpoints: auth, real-time queue, case review, decisions.
 
-Shares app.database.db / ws_manager with routers/patient.py — that's the same
-in-memory store both portals read and write, not a duplication. Calls into
-rag_engine.py to lazily generate a draft if a doctor opens a case that never
-got one from the patient-side flow (e.g. URGENT cases that skip drafting).
+Every route except login requires a bearer token, and the resolved doctor
+identity is what lands in the audit log — not a client-supplied doctor_id.
 """
 
-from datetime import datetime, timedelta
-from typing import List, Optional
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+import logging
+from typing import Dict, List, Optional
 
-from app.shared.database import db, ws_manager
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+
+from app.safety import guards
+from app.services.case_service import CaseService
+from app.shared.auth import authenticate, require_doctor, resolve_token
+from app.shared.database import db
 from app.shared.models import (
-    Appointment,
-    AppointmentType,
     DecisionType,
     DoctorDecisionRequest,
+    DoctorDecisionResponse,
     DoctorLoginRequest,
     DoctorLoginResponse,
+    Prescription,
     PrescriptionStatus,
-    ReferralInfo,
+    PrescriptionUpdateRequest,
+    ReviewStatus,
     TriageCase,
 )
-from app.patient_backend.rag_engine import RAGEngine
+from app.websocket.manager import WSEvent, case_queue_payload, ws_manager
 
-router = APIRouter()
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["doctor"])
 
 
 @router.post("/api/auth/doctor/login", response_model=DoctorLoginResponse)
 def doctor_login(payload: DoctorLoginRequest):
-    if payload.username == "doctor" and payload.password == "doctorpassword123":
-        return DoctorLoginResponse(
-            token="doc_token_secret_892347923489",
-            doctor_id="DR-101",
-            doctor_name="Dr. Sharma, MD"
-        )
-    raise HTTPException(status_code=401, detail="Invalid doctor username or password")
+    record = authenticate(payload.username, payload.password)
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return DoctorLoginResponse(**record)
 
 
 @router.websocket("/api/ws/doctor")
-async def websocket_doctor_queue(websocket: WebSocket):
+async def websocket_doctor_queue(websocket: WebSocket, token: Optional[str] = Query(default=None)):
+    """Live queue feed.
+
+    The token arrives as a query parameter because browsers cannot set headers
+    on a WebSocket handshake. It is validated before the socket is accepted, so
+    an unauthenticated client never joins the broadcast set.
+    """
+    if not token or not resolve_token(token):
+        await websocket.close(code=4401)
+        return
+
     await ws_manager.connect(websocket)
     try:
+        await websocket.send_json(
+            {
+                "event": WSEvent.CONNECTED.value,
+                "data": {"queue_size": len(db.list_cases())},
+            }
+        )
         while True:
+            # Client pings only; all meaningful traffic is server to client.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
+    except Exception:  # noqa: BLE001 - never let a socket fault kill the worker
+        logger.exception("Doctor WebSocket error")
+        await ws_manager.disconnect(websocket)
 
 
 @router.get("/api/doctor/cases", response_model=List[TriageCase])
-def get_doctor_cases(risk_filter: Optional[str] = None, status_filter: Optional[str] = None):
-    cases_list = list(db.cases.values())
-    if risk_filter:
-        cases_list = [c for c in cases_list if c.triage_status.value == risk_filter]
-    if status_filter:
-        cases_list = [c for c in cases_list if c.review_status == status_filter]
-    return sorted(cases_list, key=lambda x: x.created_at, reverse=True)
+def get_doctor_cases(
+    risk_filter: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Case queue, URGENT first."""
+    return db.list_cases(risk_filter=risk_filter, status_filter=status_filter)
 
 
 @router.get("/api/doctor/cases/{case_id}")
-def get_doctor_case_detail(case_id: str):
-    case = db.cases.get(case_id)
+def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(require_doctor)):
+    """Full case detail.
+
+    Unlike the patient view this deliberately includes the AI draft even when
+    it is unapproved — reviewing it is the doctor's job.
+    """
+    case = db.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    rx = db.prescriptions.get(case.prescription_draft_id) if case.prescription_draft_id else None
-    apt = db.appointments.get(case.appointment_id) if case.appointment_id else None
+
+    prescription = db.get_prescription_for_case(case_id)
+
     return {
         "case": case,
-        "prescription_draft": rx,
-        "appointment": apt,
-        "referral": case.referral
+        "prescription_draft": prescription,
+        "safety_signal": case.safety_signal,
+        "grounding": case.grounding,
+        "audit": db.audit_for_case(case_id),
+        "draft_blocked": case.grounding.get("blocked", False) if case.grounding else False,
+        "draft_block_reason": case.grounding.get("block_reason") if case.grounding else None,
+        "appointment": db.get_appointment(case.appointment_id) if case.appointment_id else None,
+        "referral": case.referral,
     }
 
 
-@router.post("/api/doctor/cases/{case_id}/decision")
-async def post_doctor_decision(case_id: str, payload: DoctorDecisionRequest):
-    case = db.cases.get(case_id)
+@router.post("/api/doctor/cases/{case_id}/decision", response_model=DoctorDecisionResponse)
+async def post_doctor_decision(
+    case_id: str,
+    payload: DoctorDecisionRequest,
+    doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Record APPROVE / MODIFY / REJECT / NEEDS_REVIEW / REFERRAL / OFFLINE_APPOINTMENT.
+
+    APPROVE, MODIFY, REFERRAL and OFFLINE_APPOINTMENT can each release an
+    existing draft to the patient; REFERRAL and OFFLINE_APPOINTMENT
+    additionally attach a specialist referral or an in-person appointment.
+    """
+    case = db.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    rx = db.prescriptions.get(case.prescription_draft_id) if case.prescription_draft_id else None
-    if not rx and payload.decision in [DecisionType.APPROVE, DecisionType.MODIFY, DecisionType.REFERRAL, DecisionType.OFFLINE_APPOINTMENT]:
-        rx = RAGEngine.generate_draft_prescription(case.case_id, case.symptoms, case.summary_en)
-        db.prescriptions[rx.prescription_id] = rx
-        case.prescription_draft_id = rx.prescription_id
+    if case.review_status == ReviewStatus.NEW:
+        case.review_status = ReviewStatus.IN_REVIEW
 
-    # 1. Standard Approval / Modification
-    if payload.decision == DecisionType.APPROVE:
-        case.review_status = "APPROVED"
-        if rx:
-            rx.status = PrescriptionStatus.APPROVED
-            rx.doctor_id = payload.doctor_id
-            rx.doctor_notes = payload.notes
-            rx.approved_at = datetime.now().isoformat()
-            rx.is_ai_draft = False
+    review_status, prescription, released, message = await CaseService.apply_decision(
+        case=case,
+        decision=payload.decision,
+        doctor_id=doctor["doctor_id"],
+        doctor_name=doctor["doctor_name"],
+        notes=payload.notes,
+        modified_medications=payload.modified_medications,
+        modified_instructions=payload.modified_instructions,
+        referral_specialty=payload.referral_specialty,
+        referral_notes=payload.referral_notes,
+        offline_appointment_time=payload.offline_appointment_time,
+        offline_clinic_location=payload.offline_clinic_location,
+    )
 
-    elif payload.decision == DecisionType.MODIFY:
-        case.review_status = "MODIFIED"
-        if rx:
-            rx.status = PrescriptionStatus.MODIFIED
-            if payload.modified_medications:
-                rx.medications = payload.modified_medications
-            if payload.modified_instructions:
-                rx.instructions = payload.modified_instructions
-            rx.doctor_id = payload.doctor_id
-            rx.doctor_notes = payload.notes
-            rx.approved_at = datetime.now().isoformat()
-            rx.is_ai_draft = False
+    return DoctorDecisionResponse(
+        case_id=case.case_id,
+        review_status=review_status,
+        prescription=prescription,
+        released_to_patient=released,
+        message=message,
+    )
 
-    # 2. Specialist Referral Option
-    elif payload.decision == DecisionType.REFERRAL:
-        case.review_status = "REFERRED"
-        ref_info = ReferralInfo(
-            specialty=payload.referral_specialty or "Specialist Consultation",
-            referral_notes=payload.referral_notes or "Referred for specialist evaluation.",
-            doctor_name=payload.doctor_name
+
+@router.get("/api/doctor/prescriptions/{prescription_id}", response_model=Prescription)
+def get_prescription_raw(
+    prescription_id: str, doctor: Dict[str, str] = Depends(require_doctor)
+):
+    """Canonical record, untranslated. Doctor-only."""
+    prescription = db.get_prescription(prescription_id)
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+    return prescription
+
+
+@router.patch("/api/prescriptions/{prescription_id}", response_model=Prescription)
+async def update_prescription(
+    prescription_id: str,
+    payload: PrescriptionUpdateRequest,
+    doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Amend an already-finalised prescription.
+
+    Doctor-only, and only on a record a doctor has already finalised — an
+    unreviewed AI draft is amended through the decision endpoint, not here.
+    Any edit invalidates cached translations so a patient cannot be served a
+    stale rendering of superseded content.
+    """
+    prescription = db.get_prescription(prescription_id)
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    if prescription.status not in (PrescriptionStatus.APPROVED, PrescriptionStatus.MODIFIED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only a doctor-finalised prescription can be amended. "
+                "Use the case decision endpoint to act on a draft."
+            ),
         )
-        case.referral = ref_info
-        if rx:
-            rx.status = PrescriptionStatus.APPROVED
-            rx.referral = ref_info
-            rx.approved_at = datetime.now().isoformat()
-            rx.is_ai_draft = False
 
-    # 3. Offline / In-Person Appointment Option
-    elif payload.decision == DecisionType.OFFLINE_APPOINTMENT:
-        case.review_status = "OFFLINE_SCHEDULED"
-        slot_time = payload.offline_appointment_time or (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 11:00 AM")
-        location = payload.offline_clinic_location or "Main Hospital OPD Clinic, Room 102"
+    changed: List[str] = []
+    if payload.medications is not None:
+        if not payload.medications:
+            raise HTTPException(
+                status_code=400, detail="A prescription must contain at least one medication"
+            )
+        prescription.medications = payload.medications
+        changed.append("medications")
+    if payload.instructions is not None:
+        prescription.instructions = payload.instructions
+        changed.append("instructions")
+    if payload.doctor_notes is not None:
+        prescription.doctor_notes = payload.doctor_notes
+        changed.append("doctor_notes")
 
-        offline_apt = Appointment(
-            case_id=case.case_id,
-            patient_id=case.patient_id,
-            doctor_id=payload.doctor_id,
-            doctor_name=payload.doctor_name,
-            type=AppointmentType.DOCTOR_SCHEDULED_OFFLINE,
-            slot_time=slot_time,
-            clinic_location=location,
-            notes=payload.notes or "Doctor scheduled in-person physical consultation."
-        )
-        db.appointments[offline_apt.appointment_id] = offline_apt
-        case.appointment_id = offline_apt.appointment_id
+    if not changed:
+        raise HTTPException(status_code=400, detail="No changes supplied")
 
-        if rx:
-            rx.status = PrescriptionStatus.APPROVED
-            rx.approved_at = datetime.now().isoformat()
-            rx.is_ai_draft = False
+    prescription.status = PrescriptionStatus.MODIFIED
+    prescription.is_ai_draft = False
+    prescription.doctor_id = doctor["doctor_id"]
+    prescription.doctor_name = doctor["doctor_name"]
+    prescription.approved_at = prescription.approved_at or None
+    prescription.translations = {}
+    db.save_prescription(prescription)
 
-    elif payload.decision == DecisionType.REJECT:
-        case.review_status = "REJECTED"
-        if rx:
-            rx.status = PrescriptionStatus.REJECTED
+    case = db.get_case(prescription.case_id)
+    if case:
+        case.review_status = ReviewStatus.MODIFIED
+        db.save_case(case)
+        await ws_manager.broadcast(WSEvent.CASE_DECIDED, case_queue_payload(case))
 
-    elif payload.decision == DecisionType.NEEDS_REVIEW:
-        case.review_status = "NEEDS_REVIEW"
-        if rx:
-            rx.status = PrescriptionStatus.NEEDS_REVIEW
+    db.record_audit(
+        "PRESCRIPTION_AMENDED",
+        case_id=prescription.case_id,
+        prescription_id=prescription.prescription_id,
+        actor=doctor["doctor_id"],
+        detail=f"Amended fields: {', '.join(changed)}",
+        metadata={"fields": changed},
+    )
 
-    db.cases[case.case_id] = case
-    if rx:
-        db.prescriptions[rx.prescription_id] = rx
+    return prescription
 
-    await ws_manager.broadcast({
-        "event": "CASE_DECISION_UPDATED",
-        "case_id": case.case_id,
-        "review_status": case.review_status
-    })
 
-    return {
-        "status": "success",
-        "case_id": case.case_id,
-        "review_status": case.review_status,
-        "prescription": rx,
-        "referral": case.referral,
-        "appointment": db.appointments.get(case.appointment_id) if case.appointment_id else None
-    }
+@router.get("/api/doctor/audit/{case_id}")
+def get_case_audit(case_id: str, doctor: Dict[str, str] = Depends(require_doctor)):
+    """Append-only decision trail for one case."""
+    if not db.get_case(case_id):
+        raise HTTPException(status_code=404, detail="Case not found")
+    return {"case_id": case_id, "events": db.audit_for_case(case_id)}

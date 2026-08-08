@@ -1,799 +1,992 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * Patient interface. Mobile-first, four phases:
+ *
+ *   language -> conversation -> waiting -> prescription
+ *
+ * Two things this screen must never do: imply the AI has prescribed anything,
+ * or show medication before a doctor has finalised it. The waiting phase is
+ * therefore explicit that a human is reviewing, and prescription content is
+ * only ever fetched from the guarded endpoint after `prescription_available`.
+ *
+ * A third thing it must never do: book an appointment on the patient's
+ * behalf. recommend_appointment (URGENT or UNCERTAIN) only ever offers a
+ * button — booking happens through an explicit patient confirmation via
+ * api.bookAppointment, never automatically.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { api, PatientSession, ChatMessage, Prescription, Appointment, ReferralInfo } from '@/lib/api';
+import {
+  ApiError,
+  api,
+  type Appointment,
+  type ChatMessage,
+  type Language,
+  type PatientStatus,
+  type PresentedPrescription,
+  type RiskState,
+  type TriageCase,
+} from '@/lib/api';
+import {
+  SpeechInput,
+  isRecognitionSupported,
+  isSynthesisSupported,
+  speak,
+  stopSpeaking,
+} from '@/lib/speech';
+import {
+  ErrorNotice,
+  RiskBadge,
+  SectionTitle,
+  Spinner,
+  StatusRail,
+  cx,
+} from '@/components/ui/clinical';
 
-const SUPPORTED_LANGUAGES = [
-  { code: 'hi', speechCode: 'hi-IN', label: 'हिन्दी (Hindi)' },
-  { code: 'kn', speechCode: 'kn-IN', label: 'ಕನ್ನಡ (Kannada)' },
-  { code: 'ta', speechCode: 'ta-IN', label: 'தமிழ் (Tamil)' },
-  { code: 'te', speechCode: 'te-IN', label: 'తెలుగు (Telugu)' },
-  { code: 'bn', speechCode: 'bn-IN', label: 'বাংলা (Bengali)' },
-  { code: 'mr', speechCode: 'mr-IN', label: 'मराठी (Marathi)' },
-  { code: 'gu', speechCode: 'gu-IN', label: 'ગુજરાતી (Gujarati)' },
-  { code: 'en', speechCode: 'en-IN', label: 'Hinglish / English (IN)' },
-  { code: 'en', speechCode: 'en-US', label: 'English (US)' },
-];
+type Phase = 'language' | 'conversation' | 'waiting' | 'prescription';
 
-export default function PatientPortal() {
-  const [lang, setLang] = useState<string>('hi');
-  const [speechLang, setSpeechLang] = useState<string>('hi-IN');
-  const [session, setSession] = useState<PatientSession | null>(null);
+const POLL_INTERVAL_MS = 4000;
+
+export default function PatientPage() {
+  const [phase, setPhase] = useState<Phase>('language');
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [language, setLanguage] = useState<Language | null>(null);
+
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputMsg, setInputMsg] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [triageStatus, setTriageStatus] = useState<'LOW_RISK' | 'UNCERTAIN' | 'URGENT' | 'COLLECTING'>('COLLECTING');
-  const [isComplete, setIsComplete] = useState(false);
+  const [clinicalState, setClinicalState] = useState<TriageCase | null>(null);
+  const [patientStatus, setPatientStatus] = useState<PatientStatus>('COLLECTING_INFORMATION');
+  const [risk, setRisk] = useState<RiskState>('UNCERTAIN');
+  const [urgentGuidance, setUrgentGuidance] = useState<string | null>(null);
+
+  const [draft, setDraft] = useState('');
+  const [interim, setInterim] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
+
+  const [listening, setListening] = useState(false);
+  const [voiceReplies, setVoiceReplies] = useState(false);
+
+  const [statusMessage, setStatusMessage] = useState('');
+  const [prescription, setPrescription] = useState<PresentedPrescription | null>(null);
+  const [prescriptionLang, setPrescriptionLang] = useState<string>('en');
+  const [loadingPrescription, setLoadingPrescription] = useState(false);
+  const [reviewRejected, setReviewRejected] = useState(false);
+
   const [recommendAppointment, setRecommendAppointment] = useState(false);
-  const [caseId, setCaseId] = useState<string | null>(null);
-  const [prescription, setPrescription] = useState<Prescription | null>(null);
-  const [rxLang, setRxLang] = useState<string>('hi');
-
-  const [appointment, setAppointment] = useState<Appointment | null>(null);
-  const [referral, setReferral] = useState<ReferralInfo | null>(null);
-  const [bookingLoading, setBookingLoading] = useState(false);
   const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
-  const [emergencyBookingLoading, setEmergencyBookingLoading] = useState(false);
+  const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [bookingAppointment, setBookingAppointment] = useState(false);
 
-  // VAD & Voice Call Engine State & REFS
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
-  const [isPatientSpeaking, setIsPatientSpeaking] = useState(false);
-  const [audioVolume, setAudioVolume] = useState(0);
+  const speechRef = useRef<SpeechInput | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
-  const isCallActiveRef = useRef<boolean>(false);
-  const isAiSpeakingRef = useRef<boolean>(false);
-  const isProcessingRef = useRef<boolean>(false);
-  const capturedTextRef = useRef<string>('');
-  const speechLangRef = useRef<string>('hi-IN');
+  const speechSupported = useMemo(() => isRecognitionSupported(), []);
+  const synthesisSupported = useMemo(() => isSynthesisSupported(), []);
 
-  const recognitionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  /* ------------------------------------------------------------- bootstrap */
 
   useEffect(() => {
-    speechLangRef.current = speechLang;
-  }, [speechLang]);
-
-  const updateAiSpeaking = (val: boolean) => {
-    isAiSpeakingRef.current = val;
-    setIsAiSpeaking(val);
-  };
-
-  const updateCallActive = (val: boolean) => {
-    isCallActiveRef.current = val;
-    setIsCallActive(val);
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, loading, isAiSpeaking, audioVolume]);
-
-  const getGreetingMessage = (code: string) => {
-    switch (code) {
-      case 'kn': return 'ನಮಸ್ಕಾರ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಆರೋಗ್ಯದ ಸಮಸ್ಯೆಗಳನ್ನು ತಿಳಿಸಿ.';
-      case 'ta': return 'வணக்கம். உங்கள் சுகாதாரப் பிரச்சினைகளை விவரிக்கவும்.';
-      case 'te': return 'నమస్కారం. దయచేసి మీ ఆరోగ్య సమస్యలను తెలియజేయండి.';
-      case 'bn': return 'নমস্কার। আপনার স্বাস্থ্য সমস্যা বিস্তারিত জানান।';
-      case 'mr': return 'नमस्कार. कृपया तुमच्या आरोग्य समस्येचे वर्णन करा.';
-      case 'gu': return 'નમસ્તે. કૃપા કરીને તમારી આરોગ્ય સમસ્યાઓ જણાવો.';
-      case 'en': return 'Hello. Please describe the health problem or symptoms you are experiencing today.';
-      default: return 'नमस्ते। कृपया अपनी स्वास्थ्य संबंधी समस्या या लक्षणों का विवरण दें।';
-    }
-  };
-
-  const initSession = async (selectedLang: string) => {
-    setLoading(true);
-    stopCall();
-    try {
-      const sess = await api.startSession(selectedLang);
-      setSession(sess);
-      setMessages([
-        {
-          sender: 'ai',
-          text: getGreetingMessage(selectedLang),
-          timestamp: new Date().toISOString()
-        }
-      ]);
-      setTriageStatus('COLLECTING');
-      setIsComplete(false);
-      setRecommendAppointment(false);
-      setPrescription(null);
-      setAppointment(null);
-      setReferral(null);
-      setRecommendedSpecialty(null);
-    } catch (err) {
-      console.error('Session start error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    initSession(lang);
+    api
+      .listLanguages()
+      .then(setLanguages)
+      .catch(() => setError('Could not load languages. Is the clinical service running?'));
+    speechRef.current = new SpeechInput();
     return () => {
-      stopCall();
+      speechRef.current?.stop();
+      stopSpeaking();
     };
   }, []);
 
-  const handleLanguageSelect = (langObj: typeof SUPPORTED_LANGUAGES[0]) => {
-    setLang(langObj.code);
-    setRxLang(langObj.code);
-    setSpeechLang(langObj.speechCode);
-    speechLangRef.current = langObj.speechCode;
-    initSession(langObj.code);
-  };
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, sending]);
 
-  // Initialize Web Audio VAD Volume Analyzer
-  const startAudioAnalyzer = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 64;
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      audioContextRef.current = audioCtx;
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-      const checkVolume = () => {
-        if (!isCallActiveRef.current) return;
-
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        const normalizedVol = Math.min(100, Math.round((avg / 128) * 100));
-        setAudioVolume(normalizedVol);
-
-        if (!isAiSpeakingRef.current && !isProcessingRef.current) {
-          if (normalizedVol > 8) {
-            setIsPatientSpeaking(true);
-            if (silenceTimerRef.current) {
-              clearTimeout(silenceTimerRef.current);
-              silenceTimerRef.current = null;
-            }
-          } else if (isPatientSpeaking) {
-            if (!silenceTimerRef.current) {
-              silenceTimerRef.current = setTimeout(() => {
-                setIsPatientSpeaking(false);
-                triggerAutoSubmit();
-              }, 800);
-            }
-          }
-        }
-
-        animationFrameRef.current = requestAnimationFrame(checkVolume);
-      };
-
-      checkVolume();
-    } catch (err) {
-      console.error('Audio analyzer error:', err);
-    }
-  };
-
-  const stopAudioAnalyzer = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch (e) {}
-      audioContextRef.current = null;
-    }
-    setAudioVolume(0);
-    setIsPatientSpeaking(false);
-  };
-
-  // Continuous Speech Recognition Engine with multi-language dialect support
-  const startSpeechRecognition = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = speechLangRef.current;
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: any) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const transcript = result[0].transcript;
-
-        if (transcript && transcript.trim()) {
-          capturedTextRef.current = transcript.trim();
-          setInputMsg(transcript.trim());
-
-          if (result.isFinal && !isProcessingRef.current && !isAiSpeakingRef.current) {
-            triggerAutoSubmit();
-          }
-        }
-      }
-    };
-
-    recognition.onerror = () => {
-      if (isCallActiveRef.current && !isAiSpeakingRef.current && !isProcessingRef.current) {
-        setTimeout(() => startSpeechRecognition(), 400);
-      }
-    };
-
-    recognition.onend = () => {
-      if (capturedTextRef.current.trim() && !isProcessingRef.current && !isAiSpeakingRef.current) {
-        triggerAutoSubmit();
-      } else if (isCallActiveRef.current && !isAiSpeakingRef.current && !isProcessingRef.current) {
-        setTimeout(() => startSpeechRecognition(), 300);
-      }
-    };
-
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch (e) {}
-  };
-
-  // Auto-Submit Transcribed Voice Text to Backend automatically
-  const triggerAutoSubmit = () => {
-    const textToSubmit = capturedTextRef.current.trim() || inputMsg.trim();
-    if (!textToSubmit || isProcessingRef.current || isAiSpeakingRef.current) return;
-
-    capturedTextRef.current = '';
-    isProcessingRef.current = true;
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-    }
-
-    handleSendMessageText(textToSubmit);
-  };
-
-  // Speak AI Response Out Loud
-  const speakAiResponse = (text: string, onComplete?: () => void) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      updateAiSpeaking(true);
-
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch (e) {}
-      }
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = speechLangRef.current;
-      utterance.rate = 1.0;
-
-      utterance.onend = () => {
-        updateAiSpeaking(false);
-        isProcessingRef.current = false;
-        if (isCallActiveRef.current) {
-          startSpeechRecognition();
-        }
-        if (onComplete) onComplete();
-      };
-
-      utterance.onerror = () => {
-        updateAiSpeaking(false);
-        isProcessingRef.current = false;
-        if (isCallActiveRef.current) {
-          startSpeechRecognition();
-        }
-        if (onComplete) onComplete();
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } else {
-      isProcessingRef.current = false;
-      if (onComplete) onComplete();
-    }
-  };
-
-  // Toggle Voice Call Mode
-  const toggleVoiceCall = () => {
-    if (isCallActiveRef.current) {
-      stopCall();
-    } else {
-      updateCallActive(true);
-      isProcessingRef.current = false;
-      capturedTextRef.current = '';
-
-      startAudioAnalyzer();
-      startSpeechRecognition();
-
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg && lastMsg.sender === 'ai') {
-        speakAiResponse(lastMsg.text);
-      }
-    }
-  };
-
-  const stopCall = () => {
-    updateCallActive(false);
-    updateAiSpeaking(false);
-    isProcessingRef.current = false;
-    capturedTextRef.current = '';
-
-    stopAudioAnalyzer();
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-    }
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-  };
-
-  // Send Patient Message
-  const handleSendMessageText = async (textToSend: string) => {
-    if (!textToSend.trim() || !session || loading) return;
-
-    setInputMsg('');
-    const newMsg: ChatMessage = {
-      sender: 'patient',
-      text: textToSend,
-      timestamp: new Date().toISOString()
-    };
-    setMessages((prev) => [...prev, newMsg]);
-    setLoading(true);
-
-    try {
-      const res = await api.sendMessage(session.session_id, textToSend);
-      setTriageStatus(res.triage_status);
-      setRecommendAppointment(res.recommend_appointment);
-      if (res.case_id) setCaseId(res.case_id);
-
-      if (res.auto_booked_appointment) {
-        setAppointment(res.auto_booked_appointment);
-      }
-
-      if (res.recommended_specialty) {
-        setRecommendedSpecialty(res.recommended_specialty);
-      }
-
-      const aiText = res.ai_response;
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: 'ai',
-          text: aiText,
-          timestamp: new Date().toISOString()
-        }
-      ]);
-
-      if (res.is_complete || res.triage_status === 'URGENT') {
-        setIsComplete(true);
-      }
-
-      if (isCallActiveRef.current) {
-        speakAiResponse(aiText);
-      }
-    } catch (err) {
-      console.error('Send error:', err);
-      isProcessingRef.current = false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (inputMsg.trim()) {
-      handleSendMessageText(inputMsg.trim());
-    }
-  };
+  /* --------------------------------------------------------- waiting poll */
 
   useEffect(() => {
-    if (!caseId || triageStatus === 'URGENT') return;
+    if (phase !== 'waiting' || !sessionId) return;
 
-    const interval = setInterval(async () => {
+    let cancelled = false;
+
+    const poll = async () => {
       try {
-        const detail = await api.getCaseDetail(caseId);
-        if (detail.prescription_draft && (detail.prescription_draft.status === 'APPROVED' || detail.prescription_draft.status === 'MODIFIED')) {
-          const rxData = await api.getPrescription(detail.prescription_draft.prescription_id, rxLang);
-          setPrescription(rxData);
+        const status = await api.patientStatus(sessionId);
+        if (cancelled) return;
+
+        setPatientStatus(status.patient_status);
+        setStatusMessage(status.message);
+        setRisk(status.triage_status);
+        setRecommendAppointment(status.recommend_appointment);
+        setRecommendedSpecialty(status.recommended_specialty);
+        if (status.appointment) setAppointment(status.appointment);
+
+        if (status.rejected) {
+          setReviewRejected(true);
+          return;
         }
-        if (detail.appointment) {
-          setAppointment(detail.appointment);
+
+        if (status.prescription_available && status.prescription_id) {
+          setLoadingPrescription(true);
+          const initial = language?.code ?? 'en';
+          const presented = await api.getPrescription(status.prescription_id, initial);
+          if (cancelled) return;
+          setPrescription(presented);
+          setPrescriptionLang(initial);
+          setLoadingPrescription(false);
+          setPhase('prescription');
         }
-        if (detail.referral) {
-          setReferral(detail.referral);
+      } catch {
+        // Transient failures are expected while polling; the next tick retries.
+      }
+    };
+
+    poll();
+    const timer = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [phase, sessionId, language]);
+
+  /* ----------------------------------------------------------- actions */
+
+  const beginSession = useCallback(async (selected: Language) => {
+    setError(null);
+    try {
+      const session = await api.startSession(selected.code);
+      setLanguage(selected);
+      setSessionId(session.session_id);
+      setPatientStatus(session.status);
+      setPrescriptionLang(selected.code);
+      setPhase('conversation');
+
+      // The backend seeds the opening greeting into the transcript when the
+      // session is created; read it rather than sending a dummy message.
+      const state = await api.getTriageState(session.session_id).catch(() => null);
+      if (state?.case) {
+        setMessages(state.case.transcript);
+        setClinicalState(state.case);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not start the session.');
+    }
+  }, []);
+
+  const submitMessage = useCallback(
+    async (text: string) => {
+      if (!sessionId || !text.trim() || sending) return;
+
+      const value = text.trim();
+      setDraft('');
+      setInterim('');
+      setError(null);
+      setLastFailedMessage(null);
+      setSending(true);
+
+      // Optimistic echo so the patient sees their own words immediately.
+      setMessages((prev) => [
+        ...prev,
+        { sender: 'patient', text: value, timestamp: new Date().toISOString() },
+      ]);
+
+      try {
+        const response = await api.sendMessage(sessionId, value);
+
+        setMessages(response.clinical_state?.transcript ?? []);
+        setClinicalState(response.clinical_state);
+        setPatientStatus(response.patient_status);
+        setRisk(response.triage_status);
+        setRecommendAppointment(response.recommend_appointment);
+        setRecommendedSpecialty(response.recommended_specialty);
+
+        if (response.urgent_guidance) {
+          setUrgentGuidance(response.urgent_guidance);
+        }
+
+        if (voiceReplies && language) {
+          speak(response.ai_response, language.speech_tag);
+        }
+
+        if (response.is_complete) {
+          if (response.triage_status === 'URGENT') {
+            // Escalated cases are already handed off server-side.
+            setPhase('waiting');
+          } else {
+            await api.assess(sessionId);
+            await api.handOff(sessionId);
+            setPhase('waiting');
+          }
         }
       } catch (err) {
-        console.error('Polling error:', err);
+        // Session state is preserved server-side, so retry is safe.
+        setLastFailedMessage(value);
+        setMessages((prev) => prev.slice(0, -1));
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : 'Something went wrong. Your information is saved — please try again.',
+        );
+      } finally {
+        setSending(false);
       }
-    }, 3000);
+    },
+    [sessionId, sending, voiceReplies, language],
+  );
 
-    return () => clearInterval(interval);
-  }, [caseId, rxLang, triageStatus]);
+  const confirmAppointment = useCallback(async () => {
+    if (!clinicalState || bookingAppointment) return;
+    setBookingAppointment(true);
+    setError(null);
+    try {
+      const booked = await api.bookAppointment(
+        clinicalState.case_id,
+        undefined,
+        undefined,
+        recommendedSpecialty ?? undefined,
+      );
+      setAppointment(booked);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not book the appointment.');
+    } finally {
+      setBookingAppointment(false);
+    }
+  }, [clinicalState, recommendedSpecialty, bookingAppointment]);
 
-  const handlePrescriptionLangToggle = async (newLang: string) => {
-    setRxLang(newLang);
-    if (prescription) {
+  const toggleListening = useCallback(() => {
+    if (!language || !speechRef.current) return;
+
+    if (listening) {
+      speechRef.current.stop();
+      setListening(false);
+      return;
+    }
+
+    stopSpeaking();
+    const started = speechRef.current.start(language.speech_tag, {
+      onResult: (transcript, isFinal) => {
+        if (isFinal) {
+          setDraft((prev) => (prev ? `${prev} ${transcript}` : transcript));
+          setInterim('');
+        } else {
+          setInterim(transcript);
+        }
+      },
+      onError: (message) => {
+        setError(message);
+        setListening(false);
+        setInterim('');
+      },
+      onEnd: () => {
+        setListening(false);
+        setInterim('');
+      },
+    });
+    if (started) setListening(true);
+  }, [language, listening]);
+
+  const changePrescriptionLanguage = useCallback(
+    async (code: string) => {
+      if (!prescription) return;
+      setLoadingPrescription(true);
       try {
-        const rxData = await api.getPrescription(prescription.prescription_id, newLang);
-        setPrescription(rxData);
-      } catch (err) {
-        console.error('Translation error:', err);
+        // Re-fetches a presentation of the SAME canonical record. The backend
+        // never regenerates clinical content on a language change.
+        const next = await api.getPrescription(prescription.prescription_id, code);
+        setPrescription(next);
+        setPrescriptionLang(code);
+      } catch {
+        setError('Could not load that language. Showing the previous version.');
+      } finally {
+        setLoadingPrescription(false);
       }
-    }
-  };
+    },
+    [prescription],
+  );
 
-  // Books with the recommended specialty when we have one (SEVERE/URGENT
-  // paths), otherwise a plain optional consult (post-approval follow-up).
-  const handleBookOptionalAppointment = async () => {
-    if (!caseId) return;
-    setBookingLoading(true);
-    try {
-      const apt = await api.bookAppointment(caseId, undefined, undefined, recommendedSpecialty || undefined);
-      setAppointment(apt);
-    } catch (err) {
-      console.error('Booking error:', err);
-    } finally {
-      setBookingLoading(false);
-    }
-  };
+  /* -------------------------------------------------------------- render */
 
-  const handleConfirmEmergencyAppointment = async () => {
-    if (!caseId) return;
-    setEmergencyBookingLoading(true);
-    try {
-      const apt = await api.bookAppointment(caseId);
-      setAppointment(apt);
-    } catch (err) {
-      console.error('Emergency booking error:', err);
-    } finally {
-      setEmergencyBookingLoading(false);
-    }
-  };
+  if (phase === 'language') {
+    return (
+      <LanguageChooser
+        languages={languages}
+        error={error}
+        onSelect={beginSession}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-white text-black flex flex-col justify-between p-4 sm:p-6">
-      {/* Header */}
-      <header className="max-w-4xl mx-auto w-full flex items-center justify-between py-3 px-4 bg-neutral-50 border border-neutral-300 rounded-lg mb-4">
-        <div className="flex items-center space-x-3">
-          <Link href="/" className="text-xs text-neutral-600 hover:text-black font-semibold">
-            ← Home
+    <div className="min-h-screen bg-paper">
+      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 py-3">
+          <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
+            Clinical Assistant
           </Link>
-          <span className="text-sm font-bold text-black">Patient Intake</span>
+          <div className="flex items-center gap-3">
+            {risk !== 'UNCERTAIN' && <RiskBadge risk={risk} size="sm" />}
+            <span className="label-meta">{language?.native_name}</span>
+          </div>
         </div>
-
-        <div className="flex items-center space-x-2">
-          {/* Top Indian & Global Language Dropdown Selector */}
-          <select
-            value={speechLang}
-            onChange={(e) => {
-              const selected = SUPPORTED_LANGUAGES.find(l => l.speechCode === e.target.value);
-              if (selected) handleLanguageSelect(selected);
-            }}
-            className="bg-white border border-neutral-300 text-black rounded px-2.5 py-1 text-xs font-mono font-bold focus:outline-none"
-          >
-            {SUPPORTED_LANGUAGES.map((l, idx) => (
-              <option key={idx} value={l.speechCode}>
-                🌐 {l.label}
-              </option>
-            ))}
-          </select>
-
-          {/* Hands-Free Voice Call Button */}
-          <button
-            onClick={toggleVoiceCall}
-            className={`px-3.5 py-1.5 rounded text-xs font-mono font-bold transition-all shadow-sm ${
-              isCallActive
-                ? 'bg-red-600 text-white animate-pulse border border-red-700'
-                : 'bg-black text-white hover:bg-neutral-800'
-            }`}
-          >
-            {isCallActive ? '[End Voice Call]' : '📞 [Start Open-Mic Call]'}
-          </button>
+        <div className="mx-auto max-w-2xl px-5 pb-3">
+          <StatusRail current={patientStatus} />
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto w-full flex-1 flex flex-col space-y-4 mb-4">
-        {/* Status Header */}
-        <div className="bg-neutral-50 p-3 rounded-lg border border-neutral-300 flex justify-between items-center text-xs font-mono text-black">
-          <span>
-            STATUS: {isCallActive ? `[LIVE CALL - LANGUAGE: ${speechLang}]` : triageStatus === 'URGENT' ? '[EMERGENCY HIGH RISK]' : prescription ? '[PRESCRIPTION APPROVED]' : isComplete ? '[WAITING DOCTOR REVIEW]' : '[COLLECTING DETAILS]'}
-          </span>
-          <button onClick={() => initSession(lang)} className="text-neutral-600 hover:text-black font-bold">
-            [Reset]
+      <main className="mx-auto max-w-2xl px-5 pb-32 pt-6">
+        {phase === 'conversation' && (
+          <Conversation
+            messages={messages}
+            sending={sending}
+            error={error}
+            lastFailedMessage={lastFailedMessage}
+            clinicalState={clinicalState}
+            language={language}
+            onRetry={() => lastFailedMessage && submitMessage(lastFailedMessage)}
+            transcriptEndRef={transcriptEndRef}
+          />
+        )}
+
+        {phase === 'waiting' && (
+          <WaitingRoom
+            urgent={risk === 'URGENT'}
+            urgentGuidance={urgentGuidance}
+            message={statusMessage}
+            rejected={reviewRejected}
+            loading={loadingPrescription}
+            recommendAppointment={recommendAppointment}
+            recommendedSpecialty={recommendedSpecialty}
+            appointment={appointment}
+            bookingAppointment={bookingAppointment}
+            onBookAppointment={confirmAppointment}
+          />
+        )}
+
+        {phase === 'prescription' && prescription && (
+          <PrescriptionView
+            prescription={prescription}
+            languages={languages}
+            activeLanguage={prescriptionLang}
+            loading={loadingPrescription}
+            onLanguageChange={changePrescriptionLanguage}
+          />
+        )}
+      </main>
+
+      {phase === 'conversation' && (
+        <Composer
+          draft={draft}
+          interim={interim}
+          sending={sending}
+          listening={listening}
+          speechSupported={speechSupported}
+          synthesisSupported={synthesisSupported}
+          voiceReplies={voiceReplies}
+          onDraftChange={setDraft}
+          onToggleVoiceReplies={() => {
+            stopSpeaking();
+            setVoiceReplies((v) => !v);
+          }}
+          onToggleListening={toggleListening}
+          onSubmit={() => submitMessage(draft)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+function LanguageChooser({
+  languages,
+  error,
+  onSelect,
+}: {
+  languages: Language[];
+  error: string | null;
+  onSelect: (language: Language) => void;
+}) {
+  return (
+    <div className="flex min-h-screen flex-col bg-paper">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-16">
+        <p className="label-meta">Multilingual clinical intake</p>
+        <h1 className="mt-4 text-display font-semibold text-ink">
+          Tell us how you
+          <br />
+          are feeling.
+        </h1>
+        <p className="mt-5 max-w-reading text-body text-ink-muted">
+          Speak or type in your own language. We will collect your symptoms and pass them
+          to a doctor. A doctor reviews every case and decides on any prescription.
+        </p>
+
+        <div className="mt-12">
+          <h2 className="label-meta">Choose your language</h2>
+          <div className="mt-4 grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-3">
+            {languages.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => onSelect(lang)}
+                className="group flex flex-col items-start gap-1 bg-surface px-4 py-5 text-left transition-colors hover:bg-accent-soft"
+              >
+                <span className="text-[17px] font-medium text-ink">{lang.native_name}</span>
+                <span className="text-[12px] text-ink-faint">{lang.english_name}</span>
+              </button>
+            ))}
+            {languages.length === 0 && (
+              <div className="col-span-full bg-surface px-4 py-8">
+                <Spinner label="Loading languages" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-6">
+            <ErrorNotice message={error} />
+          </div>
+        )}
+
+        <p className="mt-12 max-w-reading text-[13px] leading-relaxed text-ink-faint">
+          This service does not diagnose and does not replace a doctor. If you are having a
+          medical emergency, contact emergency services immediately.
+        </p>
+      </div>
+
+      <footer className="border-t border-rule">
+        <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-4">
+          <span className="label-meta">Patient</span>
+          <Link href="/doctor" className="text-[13px] text-ink-muted underline underline-offset-2">
+            Doctor sign in
+          </Link>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+function Conversation({
+  messages,
+  sending,
+  error,
+  lastFailedMessage,
+  clinicalState,
+  language,
+  onRetry,
+  transcriptEndRef,
+}: {
+  messages: ChatMessage[];
+  sending: boolean;
+  error: string | null;
+  lastFailedMessage: string | null;
+  clinicalState: TriageCase | null;
+  language: Language | null;
+  onRetry: () => void;
+  transcriptEndRef: React.RefObject<HTMLDivElement>;
+}) {
+  const visible = messages.filter((m) => m.text.trim() && m.text !== '​');
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-5">
+        {visible.map((message, index) => (
+          <div
+            key={`${message.timestamp}-${index}`}
+            className={cx(
+              'animate-rise',
+              message.sender === 'patient' ? 'flex justify-end' : 'flex justify-start',
+            )}
+          >
+            <div className={cx('max-w-[85%]', message.sender === 'patient' && 'text-right')}>
+              <span className="label-meta">
+                {message.sender === 'patient' ? 'You' : 'Assistant'}
+              </span>
+              <p
+                lang={message.sender === 'ai' ? language?.code : undefined}
+                className={cx(
+                  'mt-1.5 whitespace-pre-wrap px-4 py-3 text-[16px] leading-relaxed',
+                  message.sender === 'patient'
+                    ? 'border border-rule bg-surface-sunken text-ink'
+                    : 'border-l-2 border-accent bg-surface text-ink',
+                )}
+              >
+                {message.text}
+              </p>
+            </div>
+          </div>
+        ))}
+
+        {sending && (
+          <div className="flex justify-start animate-rise">
+            <div className="border-l-2 border-rule px-4 py-3">
+              <Spinner label="Thinking" />
+            </div>
+          </div>
+        )}
+        <div ref={transcriptEndRef} />
+      </div>
+
+      {error && (
+        <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} />
+      )}
+
+      {clinicalState && clinicalState.symptoms.length > 0 && (
+        <section className="border border-rule bg-surface px-4 py-4">
+          <h2 className="label-meta">Recorded so far</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
+            <SummaryPair label="Symptoms" value={clinicalState.symptoms.join(', ')} />
+            <SummaryPair label="Duration" value={clinicalState.duration} />
+            <SummaryPair label="Severity" value={clinicalState.severity} />
+            <SummaryPair
+              label="Allergies"
+              value={
+                clinicalState.allergies.length
+                  ? clinicalState.allergies.join(', ')
+                  : clinicalState.allergies_confirmed
+                    ? 'None reported'
+                    : ''
+              }
+            />
+          </dl>
+          <p className="mt-4 border-t border-rule pt-3 text-[12px] leading-relaxed text-ink-faint">
+            Only what you have told us is recorded. Nothing here is a diagnosis.
+          </p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SummaryPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="label-meta">{label}</dt>
+      <dd className={cx('mt-0.5', value ? 'text-ink' : 'text-ink-faint')}>
+        {value || 'Not yet known'}
+      </dd>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+function Composer({
+  draft,
+  interim,
+  sending,
+  listening,
+  speechSupported,
+  synthesisSupported,
+  voiceReplies,
+  onDraftChange,
+  onToggleVoiceReplies,
+  onToggleListening,
+  onSubmit,
+}: {
+  draft: string;
+  interim: string;
+  sending: boolean;
+  listening: boolean;
+  speechSupported: boolean;
+  synthesisSupported: boolean;
+  voiceReplies: boolean;
+  onDraftChange: (value: string) => void;
+  onToggleVoiceReplies: () => void;
+  onToggleListening: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-x-0 bottom-0 border-t border-rule bg-paper/95 backdrop-blur">
+      <div className="mx-auto max-w-2xl px-5 py-4">
+        {listening && (
+          <p className="mb-2 flex items-center gap-2 text-[12px] text-accent">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot" aria-hidden />
+            Listening{interim && <span className="text-ink-faint">— {interim}</span>}
+          </p>
+        )}
+
+        <div className="flex items-end gap-2">
+          <textarea
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            rows={1}
+            placeholder="Describe how you feel…"
+            disabled={sending}
+            className="field max-h-32 min-h-[46px] flex-1 resize-none"
+          />
+
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={onToggleListening}
+              aria-pressed={listening}
+              aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+              className={cx(
+                'btn h-[46px] w-[46px] shrink-0 p-0',
+                listening
+                  ? 'border-accent bg-accent text-white'
+                  : 'border-rule-strong bg-surface text-ink-muted hover:bg-surface-sunken',
+              )}
+            >
+              <MicIcon />
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={sending || !draft.trim()}
+            className="btn-primary h-[46px] shrink-0"
+          >
+            Send
           </button>
         </div>
 
-        {/* DYNAMIC REAL-TIME DECIBEL SOUNDWAVE GRAPHIC */}
-        {isCallActive && (
-          <div className="bg-black text-white p-4 rounded-lg border border-neutral-800 flex items-center justify-between font-mono text-xs shadow-xl">
-            <div className="flex items-center space-x-4">
-              {/* Dynamic Equalizer Bars */}
-              <div className="flex items-end space-x-1.5 h-7">
-                <div
-                  className="w-1.5 bg-white rounded transition-all duration-75"
-                  style={{ height: `${Math.max(6, Math.min(28, (audioVolume * 1.2)))}px` }}
-                />
-                <div
-                  className="w-1.5 bg-white rounded transition-all duration-75"
-                  style={{ height: `${Math.max(8, Math.min(28, (audioVolume * 1.6)))}px` }}
-                />
-                <div
-                  className="w-1.5 bg-white rounded transition-all duration-75"
-                  style={{ height: `${Math.max(10, Math.min(28, (audioVolume * 2.0)))}px` }}
-                />
-                <div
-                  className="w-1.5 bg-white rounded transition-all duration-75"
-                  style={{ height: `${Math.max(8, Math.min(28, (audioVolume * 1.5)))}px` }}
-                />
-                <div
-                  className="w-1.5 bg-white rounded transition-all duration-75"
-                  style={{ height: `${Math.max(6, Math.min(28, (audioVolume * 1.1)))}px` }}
-                />
-              </div>
+        {synthesisSupported && (
+          <button
+            type="button"
+            onClick={onToggleVoiceReplies}
+            className="mt-2 text-[12px] text-ink-faint underline underline-offset-2"
+          >
+            {voiceReplies ? 'Turn off spoken replies' : 'Read replies aloud'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-              <div className="space-y-0.5">
-                <div className="font-bold text-white text-xs">
-                  {isAiSpeaking
-                    ? 'AI Assistant Responding...'
-                    : isPatientSpeaking
-                      ? 'Voice Activity Detected...'
-                      : 'Open-Mic Active (Speak anytime)'}
-                </div>
-                <div className="text-[10px] text-neutral-400">
-                  Language Dialect: {speechLang} | 100% Hands-Free Call Active
-                </div>
-              </div>
-            </div>
+function MicIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-            <button onClick={stopCall} className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white rounded font-mono text-[11px]">
-              [Hang Up]
+/* ====================================================================== */
+
+function AppointmentAction({
+  tone,
+  appointment,
+  recommendedSpecialty,
+  bookingAppointment,
+  onBookAppointment,
+  bookLabel,
+  bookedLabel,
+}: {
+  tone: 'urgent' | 'uncertain';
+  appointment: Appointment | null;
+  recommendedSpecialty: string | null;
+  bookingAppointment: boolean;
+  onBookAppointment: () => void;
+  bookLabel: string;
+  bookedLabel: string;
+}) {
+  const border = tone === 'urgent' ? 'border-risk-urgent/30' : 'border-risk-uncertain/30';
+  const label = tone === 'urgent' ? 'text-risk-urgent' : 'text-risk-uncertain';
+
+  if (appointment) {
+    return (
+      <div className={cx('mt-5 border bg-surface px-4 py-3', border)}>
+        <p className={cx('label-meta', label)}>{bookedLabel}</p>
+        <p className="mt-1 text-[14px] text-ink">
+          {appointment.slot_time} · {appointment.clinic_location}
+        </p>
+        {appointment.specialty && (
+          <p className="mt-1 text-[13px] text-ink-muted">Specialist: {appointment.specialty}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5">
+      {recommendedSpecialty && (
+        <p className="mb-2 text-[13px] text-ink-muted">
+          Recommended specialist: {recommendedSpecialty}
+        </p>
+      )}
+      <button type="button" onClick={onBookAppointment} disabled={bookingAppointment} className="btn-primary">
+        {bookingAppointment ? 'Booking…' : bookLabel}
+      </button>
+    </div>
+  );
+}
+
+function WaitingRoom({
+  urgent,
+  urgentGuidance,
+  message,
+  rejected,
+  loading,
+  recommendAppointment,
+  recommendedSpecialty,
+  appointment,
+  bookingAppointment,
+  onBookAppointment,
+}: {
+  urgent: boolean;
+  urgentGuidance: string | null;
+  message: string;
+  rejected: boolean;
+  loading: boolean;
+  recommendAppointment: boolean;
+  recommendedSpecialty: string | null;
+  appointment: Appointment | null;
+  bookingAppointment: boolean;
+  onBookAppointment: () => void;
+}) {
+  if (urgent) {
+    return (
+      <div className="animate-rise border-l-2 border-risk-urgent bg-risk-urgent-soft px-5 py-6">
+        <p className="label-meta text-risk-urgent">Urgent — seek care now</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">
+          Please get emergency medical help immediately.
+        </h1>
+        <p className="mt-4 text-body leading-relaxed text-ink">
+          {urgentGuidance ||
+            'The symptoms you described need emergency medical care. Contact emergency services or go to your nearest emergency department now.'}
+        </p>
+
+        <AppointmentAction
+          tone="urgent"
+          appointment={appointment}
+          recommendedSpecialty={recommendedSpecialty}
+          bookingAppointment={bookingAppointment}
+          onBookAppointment={onBookAppointment}
+          bookLabel="Confirm & book emergency appointment now"
+          bookedLabel="Emergency appointment confirmed"
+        />
+
+        <p className="mt-5 border-t border-risk-urgent/20 pt-4 text-[13px] leading-relaxed text-ink-muted">
+          A doctor has been alerted to your case. Booking above does not replace calling
+          emergency services — do not wait for a prescription through this service.
+        </p>
+      </div>
+    );
+  }
+
+  if (recommendAppointment) {
+    return (
+      <div className="animate-rise border-l-2 border-risk-uncertain bg-risk-uncertain-soft px-5 py-6">
+        <p className="label-meta text-risk-uncertain">In-person visit recommended</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">
+          Your symptoms need an in-person evaluation.
+        </h1>
+        <p className="mt-4 text-body leading-relaxed text-ink">
+          We are not able to draft a home prescription from the information gathered so far.
+          Please book an appointment so a doctor can examine you directly.
+        </p>
+
+        <AppointmentAction
+          tone="uncertain"
+          appointment={appointment}
+          recommendedSpecialty={recommendedSpecialty}
+          bookingAppointment={bookingAppointment}
+          onBookAppointment={onBookAppointment}
+          bookLabel="Book in-person appointment"
+          bookedLabel="Appointment booked"
+        />
+      </div>
+    );
+  }
+
+  if (rejected) {
+    return (
+      <div className="animate-rise">
+        <p className="label-meta">Review complete</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">
+          Your doctor has reviewed your case.
+        </h1>
+        <p className="mt-4 max-w-reading text-body leading-relaxed text-ink-muted">
+          {message ||
+            'Your doctor did not issue a prescription for this case. Please follow up with your doctor or clinic for next steps.'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-rise">
+      <p className="label-meta">Waiting for doctor</p>
+      <h1 className="mt-3 text-title font-semibold text-ink">
+        Your information has been sent for doctor review.
+      </h1>
+      <p className="mt-4 max-w-reading text-body leading-relaxed text-ink-muted">
+        {message ||
+          'You will receive your prescription here after the doctor has reviewed your case. You can keep this page open.'}
+      </p>
+
+      <div className="mt-8 flex items-center gap-3 border-t border-rule pt-6">
+        <Spinner />
+        <span className="text-[13px] text-ink-muted">
+          {loading ? 'Loading your prescription' : 'Checking for an update'}
+        </span>
+      </div>
+
+      <p className="mt-10 max-w-reading text-[13px] leading-relaxed text-ink-faint">
+        Nothing has been prescribed yet. Only a doctor can issue your prescription.
+      </p>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+function PrescriptionView({
+  prescription,
+  languages,
+  activeLanguage,
+  loading,
+  onLanguageChange,
+}: {
+  prescription: PresentedPrescription;
+  languages: Language[];
+  activeLanguage: string;
+  loading: boolean;
+  onLanguageChange: (code: string) => void;
+}) {
+  const localised = activeLanguage !== 'en';
+
+  return (
+    <div className="animate-rise space-y-8">
+      <div>
+        <p className="label-meta text-risk-low">Approved by your doctor</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
+        {prescription.doctor_name && (
+          <p className="mt-2 text-[13px] text-ink-muted">
+            Reviewed by {prescription.doctor_name}
+            {prescription.approved_at &&
+              ` · ${new Date(prescription.approved_at).toLocaleString()}`}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <h2 className="label-meta">Show in</h2>
+        <div className="mt-2 flex flex-wrap gap-px border border-rule bg-rule">
+          {languages.map((lang) => (
+            <button
+              key={lang.code}
+              onClick={() => onLanguageChange(lang.code)}
+              disabled={loading}
+              className={cx(
+                'bg-surface px-3 py-2 text-[13px] transition-colors disabled:opacity-50',
+                lang.code === activeLanguage
+                  ? 'bg-ink text-white'
+                  : 'text-ink-muted hover:bg-surface-sunken',
+              )}
+            >
+              {lang.native_name}
             </button>
-          </div>
-        )}
+          ))}
+        </div>
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">
+          Changing the language only changes how this is written. Your medicines, doses and
+          durations stay exactly as your doctor approved them.
+        </p>
+      </div>
 
-        {/* URGENT EMERGENCY ALERT */}
-        {triageStatus === 'URGENT' && (
-          <div className="bg-red-50 border-2 border-red-600 p-5 rounded-lg text-black space-y-3">
-            <h3 className="text-base font-bold uppercase tracking-wider text-red-700">
-              ⚠️ URGENT EMERGENCY ALERT
-            </h3>
-            <p className="text-xs text-red-900 leading-relaxed font-medium">
-              High-risk medical symptoms detected. Please proceed immediately to an emergency room or call emergency medical services.
-            </p>
+      {prescription.translation_notice && (
+        <div className="border border-risk-uncertain/30 bg-risk-uncertain-soft px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-risk-uncertain">
+            {prescription.translation_notice}
+          </p>
+        </div>
+      )}
 
-            {appointment ? (
-              <div className="bg-white p-3 rounded border border-red-300 text-xs font-mono space-y-1">
-                <div className="font-bold text-red-700">[EMERGENCY APPOINTMENT CONFIRMED]</div>
-                <div>Time Slot: {appointment.slot_time}</div>
-                <div>Status: {appointment.status}</div>
-                <div>Ref ID: {appointment.appointment_id}</div>
-                {(appointment.specialty || recommendedSpecialty) && (
-                  <div>Recommended Specialist: {appointment.specialty || recommendedSpecialty}</div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-white p-3 rounded border border-red-300 space-y-2">
-                {recommendedSpecialty && (
-                  <div className="text-xs font-mono text-red-700">Recommended Specialist: {recommendedSpecialty}</div>
-                )}
-                <button
-                  disabled={emergencyBookingLoading}
-                  onClick={handleConfirmEmergencyAppointment}
-                  className="w-full px-4 py-2 bg-red-600 text-white font-bold rounded text-xs hover:bg-red-700 disabled:opacity-50"
-                >
-                  {emergencyBookingLoading ? 'Booking...' : 'Confirm & Book Emergency Appointment Now'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+      <section>
+        <SectionTitle note={`${prescription.medications.length} item(s)`}>
+          Medicines
+        </SectionTitle>
+        <ul className="mt-4 space-y-px bg-rule">
+          {prescription.medications.map((med, index) => (
+            <li key={`${med.name}-${index}`} className="bg-surface px-4 py-5">
+              {/* Name and dosage are never translated — they are copied
+                  verbatim from the record the doctor approved. */}
+              <p className="text-heading font-semibold text-ink">{med.name}</p>
+              <p className="mt-1 font-mono text-[15px] text-ink">{med.dosage}</p>
 
-        {/* SEVERE (self-reported, no red-flag match) — recommend an in-person
-            appointment directly, no prescription drafted. Note: UNCERTAIN
-            triage_status alone does NOT show this card — it resolves to
-            MODERATE severity and continues the normal draft-and-review flow;
-            only an explicit self-reported "severe" (or a true URGENT red
-            flag, shown in its own banner above) lands here. */}
-        {recommendAppointment && triageStatus !== 'URGENT' && (
-          <div className="bg-amber-50 border-2 border-amber-500 p-5 rounded-lg text-black space-y-3">
-            <h3 className="text-base font-bold uppercase tracking-wider text-amber-700">
-              In-Person Appointment Recommended
-            </h3>
-            <p className="text-xs text-amber-900 leading-relaxed font-medium">
-              Based on the severity you described, we&apos;re not drafting a home prescription for this.
-              Please book a doctor appointment so you can be examined directly.
-              {recommendedSpecialty && ` Recommended specialist: ${recommendedSpecialty}.`}
-            </p>
-
-            {appointment ? (
-              <div className="bg-white p-3.5 rounded border-2 border-neutral-800 text-xs font-mono space-y-1">
-                <div className="font-bold text-black text-sm border-b border-neutral-200 pb-1">
-                  📅 APPOINTMENT SCHEDULED
-                </div>
-                <div><strong>Slot Time:</strong> {appointment.slot_time}</div>
-                <div><strong>Location:</strong> {appointment.clinic_location}</div>
-                <div><strong>Ref ID:</strong> {appointment.appointment_id}</div>
-                {appointment.specialty && <div><strong>Specialist:</strong> {appointment.specialty}</div>}
-              </div>
-            ) : (
-              <button
-                disabled={bookingLoading}
-                onClick={handleBookOptionalAppointment}
-                className="px-4 py-2 bg-amber-600 text-white font-bold rounded text-xs hover:bg-amber-700 disabled:opacity-50"
-              >
-                {bookingLoading ? 'Booking...' : 'Book Doctor Appointment Now'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* PRESCRIPTION CARD */}
-        {prescription && (prescription.status === 'APPROVED' || prescription.status === 'MODIFIED') && (
-          <div className="bg-neutral-50 border border-neutral-400 p-5 rounded-lg space-y-4">
-            <div className="flex justify-between items-start border-b border-neutral-300 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-black uppercase tracking-wider">
-                  Doctor-Approved Prescription
-                </h3>
-                <div className="text-xs text-neutral-600 font-mono">Ref ID: {prescription.prescription_id}</div>
-              </div>
-
-              <select
-                value={rxLang}
-                onChange={(e) => handlePrescriptionLangToggle(e.target.value)}
-                className="bg-white border border-neutral-300 rounded px-2 py-1 text-xs font-mono text-black"
-              >
-                {SUPPORTED_LANGUAGES.map((l, idx) => (
-                  <option key={idx} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Specialist Referral Banner */}
-            {referral && (
-              <div className="bg-white p-4 rounded border-2 border-black space-y-1 text-xs">
-                <div className="font-bold text-black uppercase text-sm flex items-center justify-between border-b border-neutral-200 pb-1">
-                  <span>📋 SPECIALIST REFERRAL ISSUED</span>
-                  <span className="font-mono text-neutral-500 text-xs">{referral.specialty}</span>
-                </div>
-                <div className="pt-1"><strong>Referred To:</strong> {referral.specialty} Department</div>
-                <div><strong>Doctor Notes:</strong> {referral.referral_notes}</div>
-                <div><strong>Issued By:</strong> {referral.doctor_name}</div>
-              </div>
-            )}
-
-            {/* Medications Table */}
-            <div className="space-y-2">
-              <div className="text-xs font-bold uppercase text-neutral-700">
-                Prescribed Medications
-              </div>
-              <div className="space-y-2">
-                {prescription.medications.map((med, idx) => (
-                  <div key={idx} className="bg-white p-3 rounded border border-neutral-300 text-xs space-y-1 text-black">
-                    <div className="flex justify-between font-bold text-black">
-                      <span>{med.name}</span>
-                      <span className="font-mono text-neutral-700">{med.dosage}</span>
-                    </div>
-                    <div className="grid grid-cols-2 text-neutral-700 text-[11px]">
-                      <div><strong>Frequency:</strong> {med.frequency}</div>
-                      <div><strong>Duration:</strong> {med.duration}</div>
-                    </div>
-                    <div className="text-neutral-600 text-[11px]"><strong>Instructions:</strong> {med.instructions}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Doctor Appointment Details or Booking Button */}
-            {!appointment ? (
-              <div className="bg-white p-3 rounded border border-neutral-300 flex justify-between items-center text-xs">
+              <dl className="mt-4 space-y-3 border-t border-rule pt-3 text-[14px]">
                 <div>
-                  <div className="font-bold text-black">Book Follow-up Doctor Appointment</div>
-                  <div className="text-neutral-600 text-[11px]">Optionally reserve a doctor consultation slot.</div>
-                </div>
-                <button
-                  disabled={bookingLoading}
-                  onClick={handleBookOptionalAppointment}
-                  className="px-3 py-1.5 bg-black text-white font-bold rounded text-xs hover:bg-neutral-800"
-                >
-                  {bookingLoading ? 'Booking...' : 'Book Slot'}
-                </button>
-              </div>
-            ) : (
-              <div className="bg-white p-3.5 rounded border-2 border-neutral-800 text-xs font-mono space-y-1">
-                <div className="font-bold text-black text-sm border-b border-neutral-200 pb-1">
-                  📅 APPOINTMENT SCHEDULED
-                </div>
-                <div><strong>Slot Time:</strong> {appointment.slot_time}</div>
-                <div><strong>Location:</strong> {appointment.clinic_location}</div>
-                <div><strong>Ref ID:</strong> {appointment.appointment_id}</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* CHAT MESSAGES */}
-        <div className="bg-neutral-50 rounded-lg border border-neutral-300 p-4 flex-1 flex flex-col justify-between min-h-[360px] max-h-[460px]">
-          <div className="overflow-y-auto space-y-3 pr-2 flex-1">
-            {messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`flex ${msg.sender === 'patient' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[85%] p-3 rounded-lg text-xs leading-relaxed ${
-                    msg.sender === 'patient'
-                      ? 'bg-black text-white'
-                      : 'bg-white text-black border border-neutral-300 shadow-sm'
-                  }`}
-                >
-                  {msg.text}
-                  {msg.sender === 'ai' && (
-                    <button
-                      onClick={() => speakAiResponse(msg.text)}
-                      className="ml-2 text-neutral-500 hover:text-black font-mono text-[10px]"
-                    >
-                      [Listen]
-                    </button>
+                  <dt className="label-meta">How often</dt>
+                  <dd className="mt-0.5 text-ink" lang={localised ? activeLanguage : undefined}>
+                    {localised && med.frequency_localised ? med.frequency_localised : med.frequency}
+                  </dd>
+                  {localised && med.frequency_localised && (
+                    <dd className="mt-0.5 text-[12px] text-ink-faint">{med.frequency}</dd>
                   )}
                 </div>
-              </div>
-            ))}
+                <div>
+                  <dt className="label-meta">For how long</dt>
+                  <dd className="mt-0.5 font-mono text-ink">{med.duration}</dd>
+                </div>
+                {med.instructions && (
+                  <div>
+                    <dt className="label-meta">How to take it</dt>
+                    <dd className="mt-0.5 leading-relaxed text-ink" lang={localised ? activeLanguage : undefined}>
+                      {localised && med.instructions_localised
+                        ? med.instructions_localised
+                        : med.instructions}
+                    </dd>
+                    {localised && med.instructions_localised && (
+                      <dd className="mt-1 text-[12px] leading-relaxed text-ink-faint">
+                        {med.instructions}
+                      </dd>
+                    )}
+                  </div>
+                )}
+              </dl>
+            </li>
+          ))}
+        </ul>
+      </section>
 
-            {loading && (
-              <div className="text-xs text-neutral-500 font-mono">AI processing...</div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* INPUT FORM */}
-          {triageStatus !== 'URGENT' && !recommendAppointment && (
-            <form onSubmit={handleFormSubmit} className="mt-3 flex items-center space-x-2">
-              <input
-                type="text"
-                value={inputMsg}
-                onChange={(e) => setInputMsg(e.target.value)}
-                placeholder="Type or speak symptoms..."
-                disabled={loading || (isComplete && !prescription)}
-                className="flex-1 bg-white border border-neutral-300 rounded px-3 py-2 text-xs text-black placeholder-neutral-400 focus:outline-none focus:border-black disabled:opacity-50"
-              />
-
-              <button
-                type="submit"
-                disabled={loading || !inputMsg.trim() || (isComplete && !prescription)}
-                className="px-4 py-2 bg-black text-white font-bold rounded text-xs hover:bg-neutral-800 disabled:opacity-50"
-              >
-                Send
-              </button>
-            </form>
+      {prescription.instructions && (
+        <section>
+          <SectionTitle>General advice</SectionTitle>
+          <p
+            className="mt-3 max-w-reading text-body leading-relaxed text-ink"
+            lang={localised ? activeLanguage : undefined}
+          >
+            {localised && prescription.instructions_localised
+              ? prescription.instructions_localised
+              : prescription.instructions}
+          </p>
+          {localised && prescription.instructions_localised && (
+            <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
+              {prescription.instructions}
+            </p>
           )}
-        </div>
-      </main>
+        </section>
+      )}
+
+      {prescription.doctor_notes && (
+        <section>
+          <SectionTitle>Note from your doctor</SectionTitle>
+          <p className="mt-3 max-w-reading text-body leading-relaxed text-ink">
+            {prescription.doctor_notes}
+          </p>
+        </section>
+      )}
+
+      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
+        Take this exactly as written. If your symptoms get worse or you feel unwell in a new
+        way, contact your doctor or seek urgent care.
+      </p>
     </div>
   );
 }
