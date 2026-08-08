@@ -10,7 +10,7 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
 - Structured fields — symptoms, duration, severity, history, allergies — are extracted per turn (`triage_engine.py`), in English and Hindi/Hinglish, including Devanagari digits and 5 duration-phrase patterns.
 - A **deterministic** safety engine (`safety_engine.py`) — not the LLM — scans for 8 categories of red flags (chest pain, respiratory distress, stroke signs, infant high fever, loss of consciousness, severe bleeding, anaphylaxis, severe abdominal pain) in English *and* Hindi/Hinglish, and classifies the case `LOW_RISK` / `UNCERTAIN` / `URGENT`. This runs independent of the LLM's own judgment on purpose — a bad LLM generation can't silently downgrade an emergency.
 - `URGENT` → an emergency appointment is **auto-booked** immediately, in-language, no doctor action needed to reserve the slot.
-- Otherwise, once intake is complete (or the patient says "no"/"nahi" to more questions), a **RAG-grounded draft prescription** is generated (`rag_engine.py`) from a small curated formulary (fever, cold, acidity, headache, diarrhea — each with ICD-10 code, medications, and care instructions) matched by keyword relevance.
+- Otherwise, once intake is complete (or the patient says "no"/"nahi" to more questions), a **RAG-grounded draft prescription** is generated (`rag_engine.py`) from a small curated formulary (fever, cold, acidity, headache, diarrhea — each with ICD-10 code, medications, and care instructions) matched by keyword relevance — plus a **real ML classifier** (`ml_predictor.py`, trained on a public Kaggle-origin dataset) that adds a broader diagnostic hypothesis across 41 conditions when the curated formulary has no match. See *ML condition classifier* below for why this is architected as "predict the condition, never the dosage."
 - The patient then polls for the doctor's decision; once `APPROVED`/`MODIFIED`, the **canonical, doctor-approved** prescription renders — patient can switch the display language (`translation.py` translates frequency/instructions phrasing per language while **preserving medication name, dosage, and duration exactly** — translation never touches the clinical content).
 
 **Doctor side (`/doctor`, gated behind `/doctor/login`)**
@@ -18,6 +18,16 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
 - Case queue with live metrics (total / low-risk / urgent / pending), filterable by risk level, updated **in real time via WebSocket** the moment a patient submits — no polling, no manual refresh needed.
 - Case detail: English clinical summary, red flags, editable AI-drafted medication rows (add/remove/edit inline).
 - Five decisions, not three: **Approve**, **Modify & Approve**, **Reject**, plus two the base PRD didn't have — **Refer to Specialist** (8 specialties) and **Schedule In-Person Appointment** (clinic + time slot) — both generate their own record type (`ReferralInfo` / `Appointment`) attached to the case.
+
+## ML condition classifier (`patient_backend/ml_predictor.py`)
+
+The original RAG formulary only covered 5 conditions. Rather than fabricate more entries, this pulls in a **real public dataset** and trains a **real classifier** on it — with two mistakes found and fixed along the way that are worth knowing about if you extend this:
+
+- **Dataset**: "Disease Prediction Using Machine Learning" (Kaggle-origin, mirrored at [sohamvsonar/Disease-Prediction-and-Medical-Recommendation-System](https://github.com/sohamvsonar/Disease-Prediction-and-Medical-Recommendation-System)) — 4,920 rows, exactly 120 per class, 41 diseases, 132 binary symptom features. Lives in `patient_backend/data/`. It's a clean, balanced *teaching* dataset, not real de-identified EHR data — don't read high accuracy on it as clinical validation.
+- **Mistake #1 — model choice**: a Decision Tree and then a Naive Bayes classifier were tried first. Naive Bayes predicted **"AIDS" at 96% confidence** for the input "fever + body ache" alone — an artifact of AIDS having an unusually sparse symptom footprint in this dataset, not a real signal. Switched to a **RandomForest** (200 trees), which gives sane, appropriately modest top guesses for the same input (hepatitis A 30% / Malaria 21% / Dengue 14% — all genuinely plausible, none falsely overconfident).
+- **Mistake #2 — bad third-party data**: the same GitHub mirror ships a `medications.csv` mapping disease → drug list. Cross-checking it against `description.csv`/`precautions_df.csv` (which line up correctly) found scrambled rows — **"Heart attack" was mapped to varicose-vein treatments** (compression stockings, sclerotherapy) and **"Varicose veins" was mapped to thyroid medications** (Levothyroxine, radioactive iodine). That file (and the unused `diets.csv`) was deleted from this repo entirely — only `Training.csv`, `description.csv`, and `precautions_df.csv` are used, all spot-checked for correct alignment.
+- **The safety boundary this leaves**: `ml_predictor.predict_condition()` returns a condition name + confidence + description + precautions — never a medication or dosage. In `rag_engine.py`, a predicted condition only becomes a concrete medication line if it's *also* in the small, manually-verified `DOSAGE_REFERENCE`/`CLINICAL_KNOWLEDGE_BASE`; otherwise the draft explicitly reads "no verified formulary match — doctor to determine treatment" instead of inventing a dose. Predicting a diagnosis from a real dataset is a legitimate, well-scoped ML use; predicting a dosage from a public dataset (this one or any other) is not something to fake at scale — see `ml_predictor.py`'s module docstring for the full reasoning.
+- Requires `pandas` + `scikit-learn` (in `requirements.txt`); trains in-process at import time (<1s on 4,920 rows — no separate training step or model file to keep in sync).
 
 ## Architecture
 
@@ -68,7 +78,7 @@ HackVerse 2.0 2026. A two-portal system: a patient describes symptoms by **text 
 | API | FastAPI · Pydantic v2 · native `WebSocket` support |
 | AI conversation | Cascading fallback: Gemini → Groq (Llama 3.3 70B) → OpenAI (gpt-4o-mini) → DeepSeek → NVIDIA NIM → rule-based per-language question bank (works with **zero** API keys configured) |
 | Safety triage | Deterministic keyword/regex engine, independent of the LLM |
-| RAG | Curated in-code clinical formulary, keyword-relevance matched (no vector DB — appropriately simple for a 36h MVP) |
+| RAG | Curated in-code clinical formulary (verified dosages, 5 conditions), keyword-relevance matched, backed by a **RandomForestClassifier** (scikit-learn, trained on a real public 41-disease/4,920-row dataset) for broader diagnostic hypotheses — no vector DB, appropriately simple for a 36h MVP |
 | Data store | In-memory (`InMemoryDB`) — resets on backend restart, seeded with 2 demo cases on boot |
 | Real-time sync | Native WebSocket broadcast (`/api/ws/doctor`) |
 | Voice | Browser-native Web Speech API (`SpeechRecognition` + `SpeechSynthesis`) + Web Audio API for voice-activity detection — no external speech service |
@@ -90,7 +100,9 @@ backend/
       triage_engine.py         (structured field extraction)
       safety_engine.py         (deterministic red-flag rules)
       rag_engine.py            (formulary-grounded draft — doctor_backend also calls this)
+      ml_predictor.py          (RandomForest classifier — see "ML condition classifier" above)
       translation.py           (prescription language view)
+      data/                    (Training.csv, description.csv, precautions_df.csv — dataset)
     doctor_backend/          ← Doctor Backend folder
       router.py                (auth, WebSocket, case queue, decisions)
   tests/test_backend.py       (safety, RAG, translation unit tests — run with `python -m unittest`)
@@ -142,4 +154,5 @@ Set `NEXT_PUBLIC_API_URL` (defaults to `http://127.0.0.1:8000`) if the backend r
 - **No persistence** — the in-memory store resets every backend restart. Two demo cases (`CASE-DEMO-01` low-risk, `CASE-DEMO-02` urgent) are re-seeded on boot so the doctor queue is never empty.
 - **Demo-only doctor auth** — hardcoded username/password shown directly on the login form, no hashing, wide-open `CORS allow_origins=["*"]`. Fine for a judged demo on localhost; would need real auth, a real DB, and locked-down CORS before any real deployment.
 - **LLM keys optional but recommended** — without at least one of `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `NVIDIA_API_KEY` in `.env`, conversation falls back to a fixed per-language question sequence (still fully functional, just not adaptive).
-- **RAG formulary is intentionally small** (5 conditions) — a real deployment needs a reviewed, larger clinical knowledge base.
+- **Verified-dosage formulary is intentionally small** (5 conditions) — the ML classifier broadens diagnostic *reasoning* to 41 conditions, but a real deployment still needs a clinician-reviewed medication/dosage reference for all of them, not just 5. This is a deliberate safety choice, not an oversight — see *ML condition classifier* above.
+- **The ML classifier is trained on a small, clean, synthetic-feeling teaching dataset** (4,920 rows, 41 diseases) — good enough to demo real ML with real data on a hackathon timeline, not a substitute for a clinically validated diagnostic model.

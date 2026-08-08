@@ -1,7 +1,10 @@
 from typing import List, Optional, Dict, Any
 from app.shared.models import Medication, Prescription, PrescriptionStatus
+from app.patient_backend import ml_predictor
 
 # Curated Medical Formulary & Clinical Guidelines (Hackathon Knowledge Base)
+# This stays small and manually verified on purpose — see ml_predictor.py for
+# why the broader 41-condition dataset isn't used as a medication source.
 CLINICAL_KNOWLEDGE_BASE = [
     {
         "icd10": "R50.9",
@@ -130,10 +133,24 @@ class RAGEngine:
         summary_en: str
     ) -> Prescription:
         """
-        Generates RAG-grounded draft prescription.
-        Marked clearly as is_ai_draft = True and status = DRAFT.
+        Generates a RAG-grounded draft prescription. Marked clearly as
+        is_ai_draft = True and status = DRAFT.
+
+        Two separate signals, deliberately not merged into one:
+        1. `matches` (keyword lookup against CLINICAL_KNOWLEDGE_BASE) is the
+           ONLY thing allowed to produce a concrete medication + dosage — it's
+           small, but every entry is manually verified.
+        2. `ml_result` (ml_predictor.py, trained on a real public dataset) adds
+           a broader diagnostic hypothesis — condition name, confidence,
+           description, precautions — across 41 conditions instead of 5. It's
+           surfaced to the doctor as context, and only ever becomes a
+           medication line if the curated formulary has nothing (in which
+           case the line explicitly says "doctor to determine treatment"
+           rather than inventing a dose from a condition guess).
         """
         matches = cls.retrieve_clinical_guidelines(symptoms, summary_en)
+        ml_result = ml_predictor.predict_condition(symptoms)
+
         meds: List[Medication] = []
         instructions_list = []
 
@@ -141,6 +158,21 @@ class RAGEngine:
             top_match = matches[0]
             meds = top_match["medications"]
             instructions_list.append(top_match["instructions"])
+        elif ml_result:
+            meds = [
+                Medication(
+                    name=f"No verified formulary match for predicted condition: {ml_result['condition']}",
+                    dosage="To be specified by physician",
+                    frequency="To be specified by physician",
+                    duration="To be specified by physician",
+                    instructions="AI diagnostic hypothesis only — doctor to determine treatment; no medication is auto-suggested outside the verified formulary."
+                )
+            ]
+            instructions_list.append(
+                f"AI hypothesis ({ml_result['confidence']*100:.0f}% model confidence): {ml_result['description']}"
+            )
+            if ml_result["precautions"]:
+                instructions_list.append("Suggested precautions: " + ", ".join(ml_result["precautions"]) + ".")
         else:
             # General fallback supportive care
             meds = [
@@ -153,6 +185,14 @@ class RAGEngine:
                 )
             ]
             instructions_list.append("Drink plenty of fluids, rest, and follow up with doctor if symptoms worsen.")
+
+        # If the curated formulary DID match, still surface the ML hypothesis
+        # as extra context when it points at something different worth a
+        # doctor's attention — never overrides the verified medication choice.
+        if matches and ml_result and ml_result["condition"].lower() not in matches[0]["condition"].lower():
+            instructions_list.append(
+                f"AI also flags possible: {ml_result['condition']} ({ml_result['confidence']*100:.0f}% model confidence) — for doctor reference."
+            )
 
         return Prescription(
             case_id=case_id,
