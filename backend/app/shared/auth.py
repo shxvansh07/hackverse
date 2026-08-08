@@ -36,6 +36,20 @@ _LOCKOUT_SECONDS = 15 * 60
 _FAILED_ATTEMPTS: Dict[str, List[float]] = {}
 
 
+class AccountLockedError(Exception):
+    """Raised instead of a plain auth failure when the lockout window is
+    active, so the router can tell the caller "too many attempts, try again
+    in N minutes" instead of an indistinguishable "wrong password" — the
+    ambiguity is a real usability problem on a single-account demo (a doctor
+    who mistypes their own password 5 times gets locked out and then can't
+    tell that from having the wrong password), and hiding lockout state has
+    little security value here since there is only one account to probe."""
+
+    def __init__(self, retry_after_seconds: int):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"Locked out for {retry_after_seconds}s")
+
+
 def _credentials() -> tuple[str, str]:
     """Credentials come from env so they are not committed to the repo."""
     return (
@@ -44,11 +58,13 @@ def _credentials() -> tuple[str, str]:
     )
 
 
-def _is_locked_out(key: str) -> bool:
+def _lockout_remaining_seconds(key: str) -> int:
     now = time.time()
     attempts = [t for t in _FAILED_ATTEMPTS.get(key, []) if now - t < _LOCKOUT_SECONDS]
     _FAILED_ATTEMPTS[key] = attempts
-    return len(attempts) >= _MAX_FAILED_ATTEMPTS
+    if len(attempts) < _MAX_FAILED_ATTEMPTS:
+        return 0
+    return max(1, int(_LOCKOUT_SECONDS - (now - min(attempts))))
 
 
 def _record_failure(key: str) -> None:
@@ -57,8 +73,9 @@ def _record_failure(key: str) -> None:
 
 def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     lockout_key = (username or "").strip().lower() or "unknown"
-    if _is_locked_out(lockout_key):
-        return None
+    retry_after = _lockout_remaining_seconds(lockout_key)
+    if retry_after > 0:
+        raise AccountLockedError(retry_after)
 
     expected_user, expected_password = _credentials()
 
