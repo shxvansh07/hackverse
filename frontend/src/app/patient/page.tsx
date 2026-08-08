@@ -354,7 +354,6 @@ export default function PatientPage() {
             sending={sending}
             error={error}
             lastFailedMessage={lastFailedMessage}
-            clinicalState={clinicalState}
             language={language}
             onRetry={() => lastFailedMessage && submitMessage(lastFailedMessage)}
             transcriptEndRef={transcriptEndRef}
@@ -490,7 +489,6 @@ function Conversation({
   sending,
   error,
   lastFailedMessage,
-  clinicalState,
   language,
   onRetry,
   transcriptEndRef,
@@ -499,7 +497,6 @@ function Conversation({
   sending: boolean;
   error: string | null;
   lastFailedMessage: string | null;
-  clinicalState: TriageCase | null;
   language: Language | null;
   onRetry: () => void;
   transcriptEndRef: React.RefObject<HTMLDivElement>;
@@ -549,41 +546,6 @@ function Conversation({
       {error && (
         <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} />
       )}
-
-      {clinicalState && clinicalState.symptoms.length > 0 && (
-        <section className="border border-rule bg-surface px-4 py-4">
-          <h2 className="label-meta">Recorded so far</h2>
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
-            <SummaryPair label="Symptoms" value={clinicalState.symptoms.join(', ')} />
-            <SummaryPair label="Duration" value={clinicalState.duration} />
-            <SummaryPair label="Severity" value={clinicalState.severity} />
-            <SummaryPair
-              label="Allergies"
-              value={
-                clinicalState.allergies.length
-                  ? clinicalState.allergies.join(', ')
-                  : clinicalState.allergies_confirmed
-                    ? 'None reported'
-                    : ''
-              }
-            />
-          </dl>
-          <p className="mt-4 border-t border-rule pt-3 text-[12px] leading-relaxed text-ink-faint">
-            Only what you have told us is recorded. Nothing here is a diagnosis.
-          </p>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function SummaryPair({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="label-meta">{label}</dt>
-      <dd className={cx('mt-0.5', value ? 'text-ink' : 'text-ink-faint')}>
-        {value || 'Not yet known'}
-      </dd>
     </div>
   );
 }
@@ -964,7 +926,12 @@ function PrescriptionView({
                   <dd className="mt-0.5 text-ink" lang={localised ? activeLanguage : undefined}>
                     {localised && med.frequency_localised ? med.frequency_localised : med.frequency}
                   </dd>
-                  {localised && med.frequency_localised && (
+                  {/* Only show the English original as a second line when the
+                      "translation" actually differs from it — without an
+                      LLM, translation can silently fall back to the
+                      untranslated source, and showing identical text twice
+                      reads as a rendering bug, not a feature. */}
+                  {localised && med.frequency_localised && med.frequency_localised !== med.frequency && (
                     <dd className="mt-0.5 text-[12px] text-ink-faint">{med.frequency}</dd>
                   )}
                 </div>
@@ -980,7 +947,7 @@ function PrescriptionView({
                         ? med.instructions_localised
                         : med.instructions}
                     </dd>
-                    {localised && med.instructions_localised && (
+                    {localised && med.instructions_localised && med.instructions_localised !== med.instructions && (
                       <dd className="mt-1 text-[12px] leading-relaxed text-ink-faint">
                         {med.instructions}
                       </dd>
@@ -1004,11 +971,13 @@ function PrescriptionView({
               ? prescription.instructions_localised
               : prescription.instructions}
           </p>
-          {localised && prescription.instructions_localised && (
-            <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
-              {prescription.instructions}
-            </p>
-          )}
+          {localised &&
+            prescription.instructions_localised &&
+            prescription.instructions_localised !== prescription.instructions && (
+              <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
+                {prescription.instructions}
+              </p>
+            )}
         </section>
       )}
 

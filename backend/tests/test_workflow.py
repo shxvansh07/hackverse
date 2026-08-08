@@ -452,6 +452,62 @@ def test_questions_are_not_repeated():
     assert len(set(replies)) == len(replies)
 
 
+def test_intake_completes_with_zero_llm_providers():
+    """Regression test for a real bug: without an LLM, extraction never ran,
+    so symptoms/duration (both required) could never leave
+    missing_information and intake could never complete — the fallback
+    question bank would cycle through every question once and then repeat
+    "anything else?" forever. The very first patient answer was also being
+    silently dropped, because the greeting wasn't recognised as implicitly
+    asking about symptoms.
+
+    Also covers the fix for a second, related complaint: intake used to be
+    able to end the moment ANY question got a "no" (e.g. "no allergies"),
+    skipping the rest of the history-taking and never asking whether there
+    was anything else before handing off. It must now walk the full fixed
+    order (fallback_questions.QUESTION_ORDER) and only end on a "no" to the
+    closing question specifically."""
+    session_id = start_session("en")
+
+    r = send(session_id, "i have a strong headache")  # answers: symptoms
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: associated_symptoms
+    assert r["is_complete"] is False
+
+    r = send(session_id, "2 days")  # answers: duration
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: allergies
+    assert r["is_complete"] is False, "a 'no' mid-interview must not end the whole conversation"
+
+    r = send(session_id, "no")  # answers: medical_history
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: medications
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: anything_else (the closing question)
+    assert r["is_complete"] is True, "must complete once the closing question is answered"
+
+    case = db.get_case(r["case_id"])
+    assert case.symptoms, "symptoms should have been captured from the raw answer"
+    assert case.duration, "duration should have been captured from the raw answer"
+    assert case.allergies_confirmed
+    assert case.history_confirmed
+
+
+def test_first_patient_answer_is_not_dropped():
+    """The greeting implicitly asks about symptoms; a patient's very first
+    reply must be captured, not silently discarded while the bot re-asks the
+    same question."""
+    session_id = start_session("en")
+    send(session_id, "i have a headache")
+
+    case = db.get_case_by_session(session_id)
+    assert case.symptoms == ["i have a headache"]
+
+
 def test_empty_message_rejected():
     session_id = start_session("en")
     resp = client.post("/api/triage/message", json={"session_id": session_id, "message": "   "})
