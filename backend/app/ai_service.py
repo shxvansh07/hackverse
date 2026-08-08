@@ -45,13 +45,15 @@ class AIService:
         severity_known = known_facts.get("severity", "") or "Not specified yet"
 
         system_prompt = (
-            "You are a professional, warm, and empathetic AI Clinical Intake Assistant conducting a medical intake consultation for a physician.\n\n"
-            "CRITICAL BOUNDARIES & INSTRUCTIONS:\n"
-            "1. Focus STRICTLY on medical intake, patient symptoms, medical history, and health concerns.\n"
-            "2. If the user asks non-medical off-topic questions (e.g., math calculations like 'whats 5*4', general trivia like 'who is the president of india', politics, sports, coding, etc.), DO NOT perform the calculation or answer the trivia. Politely state that you are a clinical assistant focused on their health consultation, and ask them about their symptoms or health concerns.\n"
-            "3. Converse naturally, empathetically, and concisely (1-2 brief sentences).\n"
-            f"4. ALREADY KNOWN FACTS: Symptoms = [{symptoms_known}], Duration = [{duration_known}], Severity = [{severity_known}]. Do NOT repeat questions for facts already collected.\n"
-            f"5. You MUST respond in the native script of language code '{lang}'."
+            "You are a dedicated AI Clinical Assistant conducting a medical intake for a doctor.\n\n"
+            "STRICT CLINICAL INSTRUCTIONS:\n"
+            "1. Focus ONLY on patient health, clinical symptoms, and medical intake.\n"
+            "2. If the user asks non-medical questions (e.g. math calculations like 5*4, general knowledge/trivia like 'who is the president', sports, politics, etc.), DO NOT answer the non-medical question. Politely decline and redirect the patient back to describing their health symptoms or medical concerns.\n"
+            "3. Converse naturally, empathetically, and professionally like a real clinical intake assistant.\n"
+            "4. Listen attentively to symptoms and ask relevant follow-up questions if useful details are missing.\n"
+            f"5. ALREADY KNOWN FACTS: Symptoms = [{symptoms_known}], Duration = [{duration_known}], Severity = [{severity_known}]. Do NOT repeat questions for facts already mentioned.\n"
+            "6. Keep your responses brief (1-2 sentences) so it reads smoothly and speaks aloud nicely.\n"
+            f"7. You MUST respond natively in the language corresponding to language code '{lang}'."
         )
 
         # 1. Groq API (High Speed LPU Llama-3.3 70B)
@@ -67,7 +69,7 @@ class AIService:
 
                 url = "https://api.groq.com/openai/v1/chat/completions"
                 headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-                payload = {"model": GROQ_MODEL, "messages": messages, "temperature": 0.3, "max_tokens": 150}
+                payload = {"model": GROQ_MODEL, "messages": messages, "temperature": 0.5, "max_tokens": 120}
                 with httpx.Client(timeout=8.0) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     if resp.status_code == 200:
@@ -90,7 +92,7 @@ class AIService:
 
                 payload = {
                     "contents": [{"parts": [{"text": conversation_text}]}],
-                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 150}
+                    "generationConfig": {"temperature": 0.5, "maxOutputTokens": 120}
                 }
                 with httpx.Client(timeout=10.0) as client:
                     resp = client.post(url, json=payload)
@@ -115,7 +117,7 @@ class AIService:
 
                 url = "https://api.openai.com/v1/chat/completions"
                 headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-                payload = {"model": OPENAI_MODEL, "messages": messages, "temperature": 0.3, "max_tokens": 150}
+                payload = {"model": OPENAI_MODEL, "messages": messages, "temperature": 0.5, "max_tokens": 120}
                 with httpx.Client(timeout=8.0) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     if resp.status_code == 200:
@@ -131,8 +133,8 @@ class AIService:
     @classmethod
     def _get_dynamic_conversational_fallback(cls, msg: str, lang: str, previous_ai_texts: List[str]) -> str:
         """
-        Provides friendly, professional, clinical intake fallbacks
-        that politely redirect non-medical queries back to health intake.
+        Provides friendly, varied, natural human conversational fallbacks
+        instead of repeating fixed template questions.
         """
         msg_lower = msg.lower()
 
@@ -140,92 +142,54 @@ class AIService:
         pools = {
             "hi": {
                 "greetings": [
-                    "नमस्ते! मैं आपका क्लिनिकल असिस्टेंट हूँ। आज आपको क्या स्वास्थ्य संबंधी समस्या हो रही है?",
-                    "नमस्ते! बताइए आज आपको क्या लक्षण या तकलीफ महसूस हो रही है?"
+                    "नमस्ते! मैं आपका क्लिनिकल असिस्टेंट हूँ। आज आपको क्या स्वास्थ्य समस्या महसूस हो रही है?",
+                    "नमस्ते! कृपया अपनी सेहत से जुड़े लक्षण या समस्या बताइए。"
                 ],
                 "symptoms": [
-                    "समझ गया। यह तकलीफ आपको कब से हो रही है?",
-                    "क्या इसके अलावा कोई अन्य लक्षण या परेशानी महसूस हो रही है?"
+                    "यह तकलीफ कब से हो रही है आपको? क्या इसके अलावा कोई और लक्षण भी है?",
+                    "मैं समझ रहा हूँ। क्या आपको इसके साथ बुखार या दर्द भी महसूस हो रहा है?"
                 ],
                 "general": [
-                    "मैं एक क्लिनिकल मेडिकल असिस्टेंट हूँ और केवल आपके स्वास्थ्य परामर्श में सहायता कर सकता हूँ। कृपया अपने लक्षणों के बारे में बताएं।",
-                    "आइए आपके स्वास्थ्य परामर्श पर ध्यान दें। आज आपको क्या शारीरिक समस्या महसूस हो रही है?"
+                    "मैं आपका स्वास्थ्य सहायक हूँ और केवल चिकित्सीय प्रश्नों में मदद कर सकता हूँ। कृपया अपने स्वास्थ्य लक्षणों के बारे में बताएं।",
+                    "आइए आपकी सेहत पर ध्यान दें। क्या आपको आज शरीर में कोई दर्द, बुखार या अन्य समस्या है?"
                 ]
             },
             "kn": {
                 "greetings": [
-                    "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಕ್ಲಿನಿಕಲ್ ಸಹಾಯಕ. ಇಂದು ನಿಮಗಿರುವ ಆರೋಗ್ಯ ಸಮಸ್ಯೆ ಏನು?",
-                    "ನಮಸ್ಕಾರ! ನಿಮ್ಮ ದೇಹದಲ್ಲಿ ಏನು ತೊಂದರೆ ಕಾಣಿಸಿಕೊಳ್ಳುತ್ತಿದೆ?"
+                    "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಕ್ಲಿನಿಿಕಲ್ ಸಹಾಯಕ. ನಿಮ್ಮ ಆರೋಗ್ಯದ ಸಮಸ್ಯೆಯನ್ನು ತಿಳಿಸಿ.",
+                    "ಹಲೋ! ಇಂದು ನಿಮಗೆ ಯಾವ ಆರೋಗ್ಯ ತೊಂದರೆ ಇದೆ?"
                 ],
                 "symptoms": [
-                    "ಅರ್ಥವಾಯಿತು. ಈ ತೊಂದರೆ ಎಷ್ಟು ದಿನದಿಂದ ಇದೆ?",
-                    "ಇದರ ಹೊರತಾಗಿ ಬೇರೆ ಯಾವುದೇ ರೋಗಲಕ್ಷಣಗಳಿವೆಯೇ?"
+                    "ಇದು ಎಷ್ಟು ದಿನದಿಂದ ಇದೆ ಹೇಳಿ? ಬೇರೆ ತೊಂದರೆ ಇದೆಯಾ?",
+                    "ಅರ್ಥ ಆಯ್ತು. ಇದರ ಜೊತೆಗೆ ಜ್ವರ ಅಥವಾ ನೋವು ಇದೆಯಾ?"
                 ],
                 "general": [
-                    "ನಾನು ನಿಮ್ಮ ವೈದ್ಯಕೀಯ ಆರೋಗ್ಯ ಸಹಾಯಕರಾಗಿದ್ದು, ನಿಮ್ಮ ಆರೋಗ್ಯ ವಿಷಯಗಳಿಗೆ ಮಾತ್ರ ಉತ್ತರಿಸಬಲ್ಲೆ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ರೋಗಲಕ್ಷಣಗಳನ್ನು ತಿಳಿಸಿ.",
-                    "ನಿಮ್ಮ ಆರೋಗ್ಯ ಸಮಾಲೋಚನೆಯತ್ತ ಗಮನ ಹರಿಸೋಣ. ಇವತ್ತು ನಿಮಗೇನು ತೊಂದರೆಯಾಗಿದೆ?"
+                    "ನಾನು ನಿಮ್ಮ ಆರೋಗ್ಯ ಸಹಾಯಕ, ದಯವಿಟ್ಟು ನಿಮ್ಮ ಆರೋಗ್ಯದ ಬಗ್ಗೆ ಮಾತ್ರ ಮಾತನಾಡಿ. ಯಾವ ತೊಂದರೆ ಇದೆ ತಿಳಿಸಿ?",
+                    "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಆರೋಗ್ಯದ ಲಕ್ಷಣಗಳನ್ನು ತಿಳಿಸಿ. ನಿಮಗೆ ಇಂದು ಹೇಗೆ ಅನ್ನಿಸುತ್ತಿದೆ?"
                 ]
             },
             "te": {
                 "greetings": [
-                    "నమస్కారం! నేను మీ క్లినికల్ అసిస్టెంట్‌ని. ఈ రోజు మీ ఆరోగ్య సమస్య ఏమిటి?",
-                    "నమస్కారం! మీకు ఎలాంటి లక్షణాలు కనిపిస్తున్నాయి?"
+                    "హలో! ఎలా ఉన్నారు? నేను మీకు ఎలా సహాయపడగలను?",
+                    "నమస్కారం! చెప్పండి విశేషాలు ఏంటి?",
+                    "హాయ్! మీతో మాట్లాడటం చాలా సంతోషంగా ఉంది."
                 ],
                 "symptoms": [
-                    "అర్థమైంది. ఈ సమస్య ఎన్ని రోజుల నుండి ఉంది?",
-                    "దీనితో పాటు ఇంకేమైనా ఇబ్బంది ఉందా?"
+                    "అయ్యో, ఇది కొంచెం ఇబ్బందిగానే ఉంటుంది. ఇది ఎన్ని రోజుల నుండి ఉంది చెప్పండి?",
+                    "ఓహో అర్థమైంది. దీంతో పాటు ఇంకేమైనా ఇబ్బంది ఉందా?",
+                    "ఏమీ కంగారు పడకండి. ఇంకా ఏమైనా చెప్పాలనుకుంటున్నారా?"
                 ],
                 "general": [
-                    "నేను క్లినికల్ మెడికಲ್ అసిస్టెంట్‌ని, మీ ఆరోగ్య విషయాలపై మాత్రమే సహాయం చేయగలను. దయచేసి మీ ఆరోగ్య సమస్యల గురించి చెప్పండి.",
-                    "మీ ఆరోగ్య సమస్యలపై దృష్టి పెడదాం. ఈ రోజు మీ శరీరం ఎలా అనిపిస్తోంది?"
+                    "అవును ఖచ్చితంగా! మీరు చెప్పింది నాకర్థమైంది.",
+                    "వావ్, ఇది చాలా బాగుంది! ఇంకా చెప్పండి?",
+                    "ఖచ్చితంగా, మీరు ఏ విషయం గురించైనా నాతో మాట్లాడవచ్చు!"
                 ]
             },
             "ta": {
                 "greetings": [
-                    "வணக்கம்! நான் உங்கள் மருத்துவ உதவியாளர். இன்று உங்களுக்கு என்ன சுகாதார பிரச்சனை?",
-                    "வணக்கம்! உங்களுக்கு என்ன அறிகுறிகள் உள்ளன?"
-                ],
-                "symptoms": [
-                    "புரிந்தது. இந்த பிரச்சனை எத்தனை நாட்களாக இருக்கிறது?",
-                    "இது தவிர வேறு ஏதேனும் அறிகுறிகள் உள்ளதா?"
-                ],
-                "general": [
-                    "நான் உங்கள் மருத்துவ உதவியாளர், உங்கள் உடல்நலம் தொடர்பான விஷயங்களுக்கு மட்டுமே உதவ முடியும். தயவுசெய்து உங்கள் அறிகுறிகளைக் கூறுங்கள்.",
-                    "உங்கள் சுகாதார ஆலோசனையில் கவனம் செலுத்துவோம். உங்களுக்கு என்ன பிரச்சனை?"
-                ]
-            },
-            "en": {
-                "greetings": [
-                    "Hello! Welcome to our clinic. What symptoms or health concerns are you experiencing today?",
-                    "Hi there! How can I assist you with your health consultation today?"
-                ],
-                "symptoms": [
-                    "Understood. How long have you been experiencing these symptoms?",
-                    "Thank you for sharing. Are you noticing any other symptoms alongside this?"
-                ],
-                "general": [
-                    "I am a medical clinical assistant focused strictly on your health consultation. Please tell me about any symptoms or health concerns you have.",
-                    "Let's focus on your medical consultation today. What physical symptoms or health issues can I help evaluate for the doctor?"
-                ]
-            }
-        }
-
-        lang_pool = pools.get(lang, pools["en"])
-        
-        # Determine category based on message content
-        if any(w in msg_lower for w in ["hi", "hello", "hey", "namaste", "namaskara", "नमस्ते", "ಹಲೋ"]):
-            options = lang_pool["greetings"]
-        elif any(w in msg_lower for w in ["fever", "pain", "dard", "bukhar", "headache", "sick", "unwell", "ತೊಂದರೆ", "ಬಾದೆ", "दर्द", "fall", "injury"]):
-            options = lang_pool["symptoms"]
-        else:
-            options = lang_pool["general"]
-
-        # Pick an option that hasn't been used yet
-        available = [opt for opt in options if opt not in previous_ai_texts]
-        if available:
-            return random.choice(available)
-        
-        return random.choice(options)"
+                    "ஹலோ! எப்படி இருக்கீங்க? நான் உங்களுக்கு எப்படி உதவட்டும்?",
+                    "வணக்கம்! சொல்லுங்க, என்ன விசேஷம்?",
+                    "ஹாய்! உங்ககிட்ட பேசுறதுல ரொம்ப சந்தோஷம்."
                 ],
                 "symptoms": [
                     "ஐயோ, இது கஷ்டமா தான் இருக்கும். இது எத்தனை நாளா இருக்கு சொல்லுங்க?",
@@ -250,9 +214,8 @@ class AIService:
                     "Don't worry at all, I've got your back! Tell me more about what's going on."
                 ],
                 "general": [
-                    "Totally agree with you! Tell me more about that.",
-                    "Haha, that's awesome! Feel free to ask or share whatever you like.",
-                    "That's so interesting! I'm here for whatever you want to chat about."
+                    "I am a clinical intake assistant focused on your health. Please tell me about any medical symptoms or health concerns you have today.",
+                    "Let's focus on your medical consultation. Are you experiencing any pain, fever, or health discomfort right now?"
                 ]
             }
         }
