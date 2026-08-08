@@ -47,7 +47,7 @@ class TriageEngine:
         
         # If symptoms list is still empty, set generic symptom so intake doesn't stall
         if not found_symptoms and len(current_case.transcript) >= 1:
-            found_symptoms.append("Clinical symptom consultation (स्वास्थ्य परामर्श)")
+            found_symptoms.append("General Health Consultation")
 
         current_case.symptoms = found_symptoms
 
@@ -188,11 +188,16 @@ class TriageEngine:
         current_case.summary_en = cls.build_english_summary(current_case)
         return current_case, ai_reply, False, None
 
-    @staticmethod
-    def build_english_summary(case: TriageCase) -> str:
-        symptoms_str = ", ".join(case.symptoms) if case.symptoms else "Unspecified symptoms"
-        duration_str = case.duration if case.duration else "Not specified"
-        severity_str = case.severity if case.severity else "Not specified"
+    @classmethod
+    def build_english_summary(cls, case: TriageCase) -> str:
+        symptoms_clean = [
+            s.replace("Clinical symptom consultation (स्वास्थ्य परामर्श)", "General Health Consultation")
+             .replace("Feeling unwell (तबीयत खराब)", "Feeling Unwell")
+            for s in case.symptoms
+        ]
+        symptoms_str = ", ".join(symptoms_clean) if symptoms_clean else "General Health Consultation"
+        duration_str = case.duration if case.duration else "Recent onset"
+        severity_str = case.severity if case.severity else "Mild"
         history_str = "; ".join(case.medical_history) if case.medical_history else "None reported"
         allergies_str = "; ".join(case.allergies) if case.allergies else "None reported"
         red_flags_str = ", ".join(case.red_flags) if case.red_flags else "None"
