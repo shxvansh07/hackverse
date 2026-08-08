@@ -461,29 +461,40 @@ def test_intake_completes_with_zero_llm_providers():
     silently dropped, because the greeting wasn't recognised as implicitly
     asking about symptoms.
 
-    This reproduces exactly the reported sequence (symptom, duration, then a
-    run of "no" answers) and asserts it actually completes."""
+    Also covers the fix for a second, related complaint: intake used to be
+    able to end the moment ANY question got a "no" (e.g. "no allergies"),
+    skipping the rest of the history-taking and never asking whether there
+    was anything else before handing off. It must now walk the full fixed
+    order (fallback_questions.QUESTION_ORDER) and only end on a "no" to the
+    closing question specifically."""
     session_id = start_session("en")
 
-    first = send(session_id, "i have a strong headache")
-    assert first["is_complete"] is False
+    r = send(session_id, "i have a strong headache")  # answers: symptoms
+    assert r["is_complete"] is False
 
-    second = send(session_id, "2 days")
-    assert second["is_complete"] is False
+    r = send(session_id, "no")  # answers: associated_symptoms
+    assert r["is_complete"] is False
 
-    # Enough "no" answers to clear every remaining tracked question — must
-    # terminate, not loop indefinitely repeating the same question.
-    result = None
-    for _ in range(6):
-        result = send(session_id, "no")
-        if result["is_complete"]:
-            break
+    r = send(session_id, "2 days")  # answers: duration
+    assert r["is_complete"] is False
 
-    assert result is not None and result["is_complete"] is True
+    r = send(session_id, "no")  # answers: allergies
+    assert r["is_complete"] is False, "a 'no' mid-interview must not end the whole conversation"
 
-    case = db.get_case(result["case_id"])
+    r = send(session_id, "no")  # answers: medical_history
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: medications
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: anything_else (the closing question)
+    assert r["is_complete"] is True, "must complete once the closing question is answered"
+
+    case = db.get_case(r["case_id"])
     assert case.symptoms, "symptoms should have been captured from the raw answer"
     assert case.duration, "duration should have been captured from the raw answer"
+    assert case.allergies_confirmed
+    assert case.history_confirmed
 
 
 def test_first_patient_answer_is_not_dropped():

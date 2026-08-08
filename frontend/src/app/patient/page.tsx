@@ -926,7 +926,12 @@ function PrescriptionView({
                   <dd className="mt-0.5 text-ink" lang={localised ? activeLanguage : undefined}>
                     {localised && med.frequency_localised ? med.frequency_localised : med.frequency}
                   </dd>
-                  {localised && med.frequency_localised && (
+                  {/* Only show the English original as a second line when the
+                      "translation" actually differs from it — without an
+                      LLM, translation can silently fall back to the
+                      untranslated source, and showing identical text twice
+                      reads as a rendering bug, not a feature. */}
+                  {localised && med.frequency_localised && med.frequency_localised !== med.frequency && (
                     <dd className="mt-0.5 text-[12px] text-ink-faint">{med.frequency}</dd>
                   )}
                 </div>
@@ -942,7 +947,7 @@ function PrescriptionView({
                         ? med.instructions_localised
                         : med.instructions}
                     </dd>
-                    {localised && med.instructions_localised && (
+                    {localised && med.instructions_localised && med.instructions_localised !== med.instructions && (
                       <dd className="mt-1 text-[12px] leading-relaxed text-ink-faint">
                         {med.instructions}
                       </dd>
@@ -966,11 +971,13 @@ function PrescriptionView({
               ? prescription.instructions_localised
               : prescription.instructions}
           </p>
-          {localised && prescription.instructions_localised && (
-            <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
-              {prescription.instructions}
-            </p>
-          )}
+          {localised &&
+            prescription.instructions_localised &&
+            prescription.instructions_localised !== prescription.instructions && (
+              <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
+                {prescription.instructions}
+              </p>
+            )}
         </section>
       )}
 

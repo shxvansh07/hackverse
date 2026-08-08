@@ -297,8 +297,23 @@ class TriageService:
             }
 
         # --- intake completion ---------------------------------------------
-        blocking = [f for f in assessment.missing_information if f in safety_engine.REQUIRED_FIELDS]
-        intake_complete = denies_more and not blocking
+        # A "no" mid-interview only answers whatever factual question was
+        # just asked (see apply_negative_confirmation) — it must not also end
+        # the whole conversation. Completion requires the *closing* question
+        # specifically (fallback_questions.QUESTION_ORDER always asks it
+        # last), so the patient always gets asked "anything else, or should I
+        # send this to your doctor?" before handoff, rather than the
+        # interview ending abruptly on an early "no allergies".
+        #
+        # Deliberately not also gated on `blocking` (unfilled required
+        # fields): if a required field genuinely never got answered, the
+        # safety engine already routes that case to UNCERTAIN rather than
+        # LOW_RISK on its own (see safety/engine.py), so it still reaches a
+        # doctor rather than auto-drafting. Requiring it here too would let a
+        # single stuck field loop the closing question forever instead of
+        # ending the conversation.
+        awaiting_closing_question = awaiting_field == "anything_else"
+        intake_complete = denies_more and awaiting_closing_question
 
         if intake_complete:
             reply = fq.handoff_message(lang)
@@ -325,7 +340,7 @@ class TriageService:
         if not reply:
             # AI unreachable or repeating itself: deterministic bank keeps the
             # interview moving rather than dead-ending the patient.
-            reply = fq.next_question(lang, assessment.missing_information, previously_asked)
+            reply = fq.next_question(lang, previously_asked)
 
         case.transcript.append(ChatMessage(sender="ai", text=reply))
         session.status = PatientStatus.COLLECTING_INFORMATION
