@@ -93,10 +93,10 @@ export default function DoctorDashboard() {
   };
 
   const openCaseDetail = async (c: TriageCase) => {
-    setActiveCase(c);
     setDecisionSuccessMsg('');
     try {
       const detail = await api.getCaseDetail(c.case_id);
+      setActiveCase(detail.case || c);
       setActiveDraft(detail.prescription_draft);
       setActiveAppointment(detail.appointment || null);
       setActiveReferral(detail.referral || null);
@@ -110,6 +110,7 @@ export default function DoctorDashboard() {
       }
     } catch (err) {
       console.error('Fetch detail error:', err);
+      setActiveCase(c);
     }
   };
 
@@ -145,7 +146,7 @@ export default function DoctorDashboard() {
         offlineTime,
         offlineLocation
       );
-      setDecisionSuccessMsg(`Decision '${decision}' recorded successfully.`);
+      setDecisionSuccessMsg(`Decision '${decision}' submitted successfully.`);
       fetchCases();
       setTimeout(() => {
         setActiveCase(null);
@@ -162,12 +163,12 @@ export default function DoctorDashboard() {
       {/* Header */}
       <header className="max-w-7xl mx-auto w-full flex justify-between items-center py-4 px-6 bg-neutral-50 rounded border border-neutral-300 mb-6">
         <div>
-          <h1 className="text-base font-bold text-black">Physician Review Dashboard</h1>
-          <p className="text-xs text-neutral-600 font-mono">Authenticated Physician Queue</p>
+          <h1 className="text-base font-bold text-black">Physician Clinical Review Dashboard</h1>
+          <p className="text-xs text-neutral-600 font-mono">Authenticated Doctor Review Portal (All Details in English)</p>
         </div>
 
         <div className="flex items-center space-x-3 text-xs font-mono">
-          <span className="text-neutral-600">[Sync: {wsConnected ? 'ACTIVE' : 'OFFLINE'}]</span>
+          <span className="text-neutral-600">[Live Queue Sync: {wsConnected ? 'ONLINE' : 'OFFLINE'}]</span>
           <button onClick={handleLogout} className="text-neutral-600 hover:text-black font-bold">
             [Sign Out]
           </button>
@@ -198,11 +199,11 @@ export default function DoctorDashboard() {
 
         {/* Filter Bar */}
         <div className="bg-neutral-50 p-3 rounded border border-neutral-300 flex justify-between items-center text-xs">
-          <span className="font-bold text-black">Queue Filter:</span>
+          <span className="font-bold text-black">Filter Queue:</span>
           <select
             value={selectedRiskFilter}
             onChange={(e) => setSelectedRiskFilter(e.target.value)}
-            className="bg-white border border-neutral-300 text-black rounded px-2.5 py-1.5 focus:outline-none"
+            className="bg-white border border-neutral-300 text-black rounded px-2.5 py-1.5 focus:outline-none font-mono"
           >
             <option value="">All Triage Risk Levels</option>
             <option value="LOW_RISK">Low Risk</option>
@@ -214,25 +215,24 @@ export default function DoctorDashboard() {
         {/* Queue Table */}
         <div className="bg-white rounded border border-neutral-300 overflow-hidden">
           <div className="p-3 border-b border-neutral-300 bg-neutral-50 flex justify-between items-center text-xs font-mono">
-            <span className="font-bold text-black">Patient Intake Cases</span>
+            <span className="font-bold text-black">Active Patient Intake Cases</span>
             <button onClick={fetchCases} className="text-neutral-600 hover:text-black font-bold">[Refresh Queue]</button>
           </div>
 
           {loading ? (
-            <div className="p-8 text-center text-xs text-neutral-500 font-mono">Loading cases...</div>
+            <div className="p-8 text-center text-xs text-neutral-500 font-mono">Loading patient queue...</div>
           ) : cases.length === 0 ? (
-            <div className="p-8 text-center text-xs text-neutral-500 font-mono">No cases found.</div>
+            <div className="p-8 text-center text-xs text-neutral-500 font-mono">No active cases found.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-black">
-                <thead className="bg-neutral-100 text-neutral-700 uppercase text-[10px] border-b border-neutral-300">
+                <thead className="bg-neutral-100 text-neutral-700 uppercase text-[10px] border-b border-neutral-300 font-mono">
                   <tr>
                     <th className="p-3">Case ID</th>
                     <th className="p-3">Patient ID</th>
-                    <th className="p-3">Primary Complaint & Summary</th>
-                    <th className="p-3">Risk State</th>
-                    <th className="p-3">Severity</th>
-                    <th className="p-3">Status</th>
+                    <th className="p-3">Primary Complaint & English Clinical Summary</th>
+                    <th className="p-3">Triage Risk</th>
+                    <th className="p-3">Review Status</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -242,20 +242,19 @@ export default function DoctorDashboard() {
                       <td className="p-3 font-mono font-bold text-black">{c.case_id}</td>
                       <td className="p-3 font-mono text-neutral-600">{c.patient_id}</td>
                       <td className="p-3 max-w-md">
-                        <div className="font-bold text-black">{c.symptoms.join(', ') || 'Intake'}</div>
-                        <div className="text-neutral-600 text-[11px] line-clamp-1">{c.summary_en}</div>
+                        <div className="font-bold text-black uppercase text-[11px]">{c.symptoms.join(', ') || 'General Consultation'}</div>
+                        <div className="text-neutral-600 text-[11px] line-clamp-2">{c.summary_en}</div>
                       </td>
-                      <td className="p-3 font-mono font-bold">[{c.triage_status}]</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${SEVERITY_BADGE[c.severity_level]}`}>
-                          {c.severity_level}
+                      <td className="p-3 font-mono font-bold">
+                        <span className={c.triage_status === 'URGENT' ? 'text-red-600 font-bold' : 'text-black'}>
+                          [{c.triage_status}]
                         </span>
                       </td>
                       <td className="p-3 font-mono font-semibold">[{c.review_status}]</td>
                       <td className="p-3 text-right">
                         <button
                           onClick={() => openCaseDetail(c)}
-                          className="px-3 py-1 bg-black text-white font-bold rounded text-[11px] hover:bg-neutral-800"
+                          className="px-3 py-1.5 bg-black text-white font-bold rounded text-[11px] hover:bg-neutral-800"
                         >
                           Review Case
                         </button>
@@ -269,56 +268,90 @@ export default function DoctorDashboard() {
         </div>
       </main>
 
-      {/* Case Detail & Referral/Appointment Review Modal */}
+      {/* Comprehensive Case Review Modal */}
       {activeCase && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white max-w-4xl w-full rounded border border-neutral-400 p-6 space-y-5 max-h-[90vh] overflow-y-auto my-auto text-xs text-black shadow-2xl">
+            {/* Modal Header */}
             <div className="flex justify-between items-start border-b border-neutral-300 pb-3">
-              <div className="flex items-center gap-2">
-                <div>
-                  <h3 className="text-base font-bold text-black">Case Review — {activeCase.case_id}</h3>
-                  <div className="text-neutral-600 font-mono">Patient: {activeCase.patient_id} | Risk: [{activeCase.triage_status}]</div>
+              <div>
+                <h3 className="text-base font-bold text-black flex items-center space-x-2">
+                  <span>Clinical Case Review — {activeCase.case_id}</span>
+                </h3>
+                <div className="text-neutral-600 font-mono text-[11px]">
+                  Patient ID: <strong>{activeCase.patient_id}</strong> | Triage Risk: <strong>[{activeCase.triage_status}]</strong> | Status: <strong>[{activeCase.review_status}]</strong>
                 </div>
-                <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${SEVERITY_BADGE[activeCase.severity_level]}`}>
-                  {activeCase.severity_level}
-                </span>
               </div>
-              <button onClick={() => setActiveCase(null)} className="text-neutral-600 hover:text-black text-sm font-mono">[Close]</button>
+              <button onClick={() => setActiveCase(null)} className="text-neutral-600 hover:text-black text-sm font-mono font-bold">[Close X]</button>
             </div>
 
             {decisionSuccessMsg && (
               <div className="bg-neutral-100 border border-black text-black p-3 rounded font-mono font-bold">
-                {decisionSuccessMsg}
+                ✓ {decisionSuccessMsg}
               </div>
             )}
 
-            {/* Summary */}
-            <div className="bg-neutral-50 p-3 rounded border border-neutral-300 space-y-1">
-              <div className="font-bold uppercase text-neutral-700">English Clinical Summary</div>
-              <p className="text-black">{activeCase.summary_en}</p>
+            {/* Structured Clinical Profile Card */}
+            <div className="bg-neutral-50 p-4 rounded border border-neutral-300 space-y-2 text-xs">
+              <div className="font-bold uppercase text-black text-xs border-b border-neutral-200 pb-1">
+                📋 English Clinical Summary & Structured Findings
+              </div>
+              <p className="text-black leading-relaxed font-medium">{activeCase.summary_en}</p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-[11px] font-mono border-t border-neutral-200">
+                <div><strong>Symptoms:</strong> {activeCase.symptoms.join(', ') || 'General Consultation'}</div>
+                <div><strong>Duration:</strong> {activeCase.duration || 'Recent onset'}</div>
+                <div><strong>Severity:</strong> {activeCase.severity || 'Mild'}</div>
+                <div><strong>Red Flags:</strong> {activeCase.red_flags.join(', ') || 'None'}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div><strong>Medical History:</strong> {activeCase.medical_history.join('; ') || 'None reported'}</div>
+                <div><strong>Allergies:</strong> {activeCase.allergies.join('; ') || 'None reported'}</div>
+              </div>
             </div>
 
-            {/* Existing Appointment or Referral */}
+            {/* FULL PATIENT CONVERSATION TRANSCRIPT SECTION */}
+            <div className="bg-neutral-50 p-4 rounded border border-neutral-300 space-y-2">
+              <div className="font-bold uppercase text-black text-xs border-b border-neutral-200 pb-1">
+                💬 Full Patient-AI Intake Conversation Transcript
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1 font-mono text-[11px]">
+                {activeCase.transcript && activeCase.transcript.length > 0 ? (
+                  activeCase.transcript.map((msg, idx) => (
+                    <div key={idx} className={`p-2 rounded border ${msg.sender === 'patient' ? 'bg-white border-neutral-300 text-black' : 'bg-neutral-100 border-neutral-200 text-neutral-800'}`}>
+                      <span className="font-bold uppercase">{msg.sender === 'patient' ? 'Patient' : 'AI Assistant'}: </span>
+                      <span>{msg.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-neutral-500 italic">No transcript recorded for this session.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Existing Appointment or Referral Records */}
             {activeAppointment && (
-              <div className="bg-neutral-50 p-3 rounded border border-neutral-300 font-mono space-y-0.5">
-                <div className="font-bold text-black">[APPOINTMENT SLOT RECORD]</div>
-                <div>Slot: {activeAppointment.slot_time}</div>
-                <div>Location: {activeAppointment.clinic_location}</div>
+              <div className="bg-neutral-100 p-3 rounded border border-black font-mono text-xs space-y-1">
+                <div className="font-bold text-black uppercase">[APPOINTMENT SLOT CONFIRMED]</div>
+                <div><strong>Slot Time:</strong> {activeAppointment.slot_time}</div>
+                <div><strong>Location:</strong> {activeAppointment.clinic_location}</div>
+                <div><strong>Type:</strong> {activeAppointment.type}</div>
               </div>
             )}
 
             {activeReferral && (
-              <div className="bg-neutral-50 p-3 rounded border border-neutral-300 font-mono space-y-0.5">
-                <div className="font-bold text-black">[SPECIALIST REFERRAL ISSUED]</div>
-                <div>Specialty: {activeReferral.specialty}</div>
-                <div>Notes: {activeReferral.referral_notes}</div>
+              <div className="bg-neutral-100 p-3 rounded border border-black font-mono text-xs space-y-1">
+                <div className="font-bold text-black uppercase">[SPECIALIST REFERRAL ISSUED]</div>
+                <div><strong>Department:</strong> {activeReferral.specialty}</div>
+                <div><strong>Clinical Notes:</strong> {activeReferral.referral_notes}</div>
+                <div><strong>Issued By:</strong> {activeReferral.doctor_name}</div>
               </div>
             )}
 
             {/* AI Draft Prescription Editor */}
             <div className="bg-neutral-50 p-4 rounded border border-neutral-300 space-y-3">
               <div className="flex justify-between items-center border-b border-neutral-300 pb-2">
-                <span className="font-bold uppercase text-neutral-700">AI Draft Prescription</span>
+                <span className="font-bold uppercase text-black text-xs">AI Draft Prescription Editor</span>
                 <button onClick={addMedicationRow} className="text-black font-bold font-mono text-[11px]">[+ Add Medication]</button>
               </div>
 
@@ -336,21 +369,21 @@ export default function DoctorDashboard() {
                       type="text"
                       value={med.dosage}
                       onChange={(e) => handleMedChange(idx, 'dosage', e.target.value)}
-                      placeholder="Dosage"
+                      placeholder="Dosage (e.g. 500mg)"
                       className="bg-white border border-neutral-300 rounded p-1.5 text-black text-xs"
                     />
                     <input
                       type="text"
                       value={med.frequency}
                       onChange={(e) => handleMedChange(idx, 'frequency', e.target.value)}
-                      placeholder="Frequency"
+                      placeholder="Frequency (e.g. Twice daily)"
                       className="bg-white border border-neutral-300 rounded p-1.5 text-black text-xs"
                     />
                     <input
                       type="text"
                       value={med.duration}
                       onChange={(e) => handleMedChange(idx, 'duration', e.target.value)}
-                      placeholder="Duration"
+                      placeholder="Duration (e.g. 3 days)"
                       className="bg-white border border-neutral-300 rounded p-1.5 text-black text-xs"
                     />
                     <div className="flex items-center space-x-1">
@@ -361,16 +394,16 @@ export default function DoctorDashboard() {
                         placeholder="Instructions"
                         className="bg-white border border-neutral-300 rounded p-1.5 text-black text-xs flex-1"
                       />
-                      <button onClick={() => removeMedicationRow(idx)} className="text-neutral-600 hover:text-black p-1">[X]</button>
+                      <button onClick={() => removeMedicationRow(idx)} className="text-neutral-600 hover:text-black p-1 font-bold">[X]</button>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* DOCTOR SPECIALIST REFERRAL & IN-PERSON APPOINTMENT OPTIONS */}
+            {/* Doctor Decision & Referral Form */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              {/* Option A: Refer to Specialist */}
+              {/* Option A: Specialist Referral */}
               <div className="bg-neutral-50 p-3 rounded border border-neutral-300 space-y-2">
                 <div className="font-bold text-black uppercase text-[11px]">Option 1: Refer to Specialist</div>
                 <select
@@ -443,7 +476,7 @@ export default function DoctorDashboard() {
                 onClick={() => handleDecision('REJECT')}
                 className="px-3 py-1.5 border border-neutral-400 text-neutral-700 rounded hover:bg-neutral-100"
               >
-                Reject
+                Reject Case
               </button>
               <button
                 disabled={actionLoading}
@@ -457,7 +490,7 @@ export default function DoctorDashboard() {
                 onClick={() => handleDecision('APPROVE')}
                 className="px-4 py-1.5 bg-black text-white font-bold rounded hover:bg-neutral-800"
               >
-                Approve Draft
+                Approve Draft Prescription
               </button>
             </div>
           </div>

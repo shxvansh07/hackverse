@@ -22,6 +22,7 @@ class TriageEngine:
 
         # 1. Symptoms Extraction
         symptom_keywords = {
+            "trauma / fall / injury": ["fall", "fell", "fell down", "cycle", "bike", "accident", "scraped", "scrape", "knee", "wound", "cut", "injury", "bruise", "chot", "gira", "giri"],
             "fever": ["fever", "bukhar", "बुखार", "temperature", "high temp", "feverish"],
             "body ache": ["body ache", "body pain", "badan dard", "अंगों में दर्द", "muscles ache"],
             "cough": ["cough", "khansi", "खांसी"],
@@ -46,29 +47,22 @@ class TriageEngine:
         
         # If symptoms list is still empty, set generic symptom so intake doesn't stall
         if not found_symptoms and len(current_case.transcript) >= 1:
-            found_symptoms.append("Clinical symptom consultation (स्वास्थ्य परामर्श)")
+            found_symptoms.append("General Health Consultation")
 
         current_case.symptoms = found_symptoms
 
-        # 2. Smart Duration Extraction
-        duration_patterns = [
-            r'(\d+\s*(?:day|days|din|dino|dnon|dinon|hours|ghante|ghanta|week|weeks|hafte|month|months|saal|years|दिन|दिनों|घंटे|घंटों|हफ्ते|हफ़्तों|महीने|साल))',
-            r'(since\s+(?:yesterday|morning|today|last night|2 days|3 days|4 days))',
-            r'((?:kal|aaj|subah|कल|आज|सुबह)\s*(?:se|से|night|raat)?)',
-            r'((?:one|two|three|four|five|six|seven|ek|do|teen|char|paanch|एक|दो|तीन|चार|पांच)\s*(?:day|days|din|dinon|दिन|दिनों))',
-            r'(\d+\s*(?:से|se))'
-        ]
-        for pattern in duration_patterns:
-            match = re.search(pattern, text_lower)
-            if match and not current_case.duration:
-                current_case.duration = match.group(1)
-                break
-
-        if not current_case.duration:
-            if any(w in text_lower for w in ["din", "days", "day", "ghante", "hours", "दिन", "घंटे", "se", "से", "aaj", "कल"]):
-                current_case.duration = patient_text.strip()
+        # 2. Smart Clean Duration Extraction
+        if not current_case.duration or current_case.duration == "Recent onset":
+            if re.search(r'\b(?:today|aaj|आज)\b', text_lower):
+                current_case.duration = "Today"
+            elif re.search(r'\b(?:yesterday|kal|कल)\b', text_lower):
+                current_case.duration = "1 day (since yesterday)"
             else:
-                current_case.duration = "Recent onset"
+                duration_match = re.search(r'(\d+\s*(?:days?|hours?|weeks?|months?|din|ghante|hafte|दिन|घंटे))', text_lower)
+                if duration_match:
+                    current_case.duration = duration_match.group(1)
+                else:
+                    current_case.duration = "Recent onset"
 
         # 3. Severity Extraction
         if any(w in text_lower for w in ["severe", "bahut tez", "गंभीर", "बहुत तेज"]):
@@ -218,15 +212,21 @@ class TriageEngine:
         current_case.summary_en = cls.build_english_summary(current_case)
         return current_case, ai_reply, False, None, False
 
-    @staticmethod
-    def build_english_summary(case: TriageCase) -> str:
-        symptoms_str = ", ".join(case.symptoms) if case.symptoms else "Unspecified symptoms"
-        duration_str = case.duration if case.duration else "Not specified"
-        severity_str = case.severity if case.severity else "Not specified"
+    @classmethod
+    def build_english_summary(cls, case: TriageCase) -> str:
+        symptoms_clean = [
+            s.replace("Clinical symptom consultation (स्वास्थ्य परामर्श)", "General Health Consultation")
+             .replace("Feeling unwell (तबीयत खराब)", "Feeling Unwell")
+            for s in case.symptoms
+        ]
+        symptoms_str = ", ".join(symptoms_clean) if symptoms_clean else "General Health Consultation"
+        duration_str = case.duration if case.duration else "Recent onset"
+        severity_str = case.severity if case.severity else "Mild"
         history_str = "; ".join(case.medical_history) if case.medical_history else "None reported"
         allergies_str = "; ".join(case.allergies) if case.allergies else "None reported"
         red_flags_str = ", ".join(case.red_flags) if case.red_flags else "None"
 
+        # Build clean concise English clinical summary
         return (
             f"Patient presents with {symptoms_str} (Severity: {severity_str}, Severity tier: {case.severity_level.value}) lasting for {duration_str}. "
             f"Medical History: {history_str}. Allergies: {allergies_str}. Red Flags: {red_flags_str}."

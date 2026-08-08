@@ -57,14 +57,14 @@ class Prescription(BaseModel):
     prescription_id: str = Field(default_factory=lambda: f"RX-{uuid.uuid4().hex[:8]}")
     case_id: str
     status: PrescriptionStatus = PrescriptionStatus.DRAFT
-    medications: List[Medication] = []
+    medications: List[Medication] = Field(default_factory=list)
     instructions: str = ""
     doctor_id: Optional[str] = None
     doctor_notes: Optional[str] = None
     approved_at: Optional[str] = None
     is_ai_draft: bool = True
     referral: Optional[ReferralInfo] = None
-    translations: Dict[str, Any] = {}
+    translations: Dict[str, Any] = Field(default_factory=dict)
 
 class PatientSession(BaseModel):
     session_id: str = Field(default_factory=lambda: f"SESS-{uuid.uuid4().hex[:8]}")
@@ -98,21 +98,20 @@ class TriageCase(BaseModel):
     case_id: str = Field(default_factory=lambda: f"CASE-{uuid.uuid4().hex[:8]}")
     session_id: str
     patient_id: str
-    symptoms: List[str] = []
-    associated_symptoms: List[str] = []
+    symptoms: List[str] = Field(default_factory=list)
+    associated_symptoms: List[str] = Field(default_factory=list)
     duration: str = ""
     severity: str = "Mild"
-    severity_level: SeverityLevel = SeverityLevel.MILD
-    medical_history: List[str] = []
-    medications: List[str] = []
-    allergies: List[str] = []
-    red_flags: List[str] = []
-    missing_information: List[str] = []
+    medical_history: List[str] = Field(default_factory=list)
+    medications: List[str] = Field(default_factory=list)
+    allergies: List[str] = Field(default_factory=list)
+    red_flags: List[str] = Field(default_factory=list)
+    missing_information: List[str] = Field(default_factory=list)
     triage_status: RiskState = RiskState.LOW_RISK
     recommended_specialty: Optional[str] = None
     review_status: str = "PENDING"
     summary_en: str = ""
-    transcript: List[ChatMessage] = []
+    transcript: List[ChatMessage] = Field(default_factory=list)
     prescription_draft_id: Optional[str] = None
     appointment_id: Optional[str] = None
     referral: Optional[ReferralInfo] = None
