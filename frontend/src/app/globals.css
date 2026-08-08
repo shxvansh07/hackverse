@@ -89,6 +89,21 @@
   }
 }
 
+/* Printable prescription (patient/page.tsx's PrintablePrescription).
+   Everything else on the page carries `print:hidden`; this is the one
+   thing meant to survive to paper/PDF. Kept outside @layer so it always
+   wins regardless of Tailwind's cascade layer ordering. */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+
+  body {
+    background: white;
+  }
+}
+
 @layer components {
   /* Small caps label used for metadata keys throughout both interfaces. */
   .label-meta {

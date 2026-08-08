@@ -20,6 +20,7 @@ from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.prescription_service import PrescriptionService
 from app.services.triage_service import TriageService
+from app.shared import clinic
 from app.shared.database import db
 from app.shared.languages import all_languages, is_supported, resolve
 from app.shared.models import (
@@ -59,6 +60,15 @@ def list_languages():
             for lang in all_languages()
         ]
     }
+
+
+@router.get("/api/clinic-info")
+def get_clinic_info():
+    """Letterhead metadata for the printable prescription. Not authenticated
+    — a patient needs this to render their own approved prescription, and it
+    carries no clinical content, only display identity (hospital/doctor
+    name, address, registration numbers)."""
+    return clinic.letterhead()
 
 
 @router.post("/api/patient/session", response_model=PatientSession)

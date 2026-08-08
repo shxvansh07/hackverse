@@ -72,6 +72,19 @@ def test_doctor_endpoints_require_auth():
     assert client.get("/api/doctor/cases/CASE-X").status_code == 401
 
 
+def test_clinic_info_is_public_and_has_letterhead_fields():
+    """Needed by the patient's printable prescription — must not require
+    doctor auth, since the patient is the one rendering it."""
+    resp = client.get("/api/clinic-info")
+    assert resp.status_code == 200
+    body = resp.json()
+    for field in (
+        "hospital_name", "hospital_address", "hospital_registration_no",
+        "doctor_name", "doctor_qualification", "doctor_registration_no",
+    ):
+        assert body.get(field)
+
+
 def test_bad_credentials_rejected():
     resp = client.post(
         "/api/auth/doctor/login", json={"username": "doctor", "password": "wrong"}

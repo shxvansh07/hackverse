@@ -43,6 +43,17 @@ export interface Language {
   mvp: boolean;
 }
 
+/** Letterhead identity for the printable prescription. Display-only. */
+export interface ClinicInfo {
+  hospital_name: string;
+  hospital_address: string;
+  hospital_phone: string;
+  hospital_registration_no: string;
+  doctor_name: string;
+  doctor_qualification: string;
+  doctor_registration_no: string;
+}
+
 export interface Medication {
   name: string;
   dosage: string;
@@ -368,6 +379,8 @@ export const api = {
 
   listLanguages: () =>
     request<{ languages: Language[] }>('/api/languages').then((r) => r.languages),
+
+  getClinicInfo: () => request<ClinicInfo>('/api/clinic-info'),
 
   startSession: (language: string, patientName = 'Patient') =>
     request<PatientSession>('/api/patient/session', {

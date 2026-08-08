@@ -429,6 +429,16 @@ function CaseReview({
     setNotes('');
   }, [draft?.prescription_id]);
 
+  // Mirrors the backend's Medication validation (min_length=1 after trim on
+  // name/dosage/frequency/duration) — catch a blank row here, before the
+  // API call, rather than only after a 422 comes back.
+  const medicationsInvalid =
+    medications.length === 0 ||
+    medications.some(
+      (m) =>
+        !m.name.trim() || !m.dosage.trim() || !m.frequency.trim() || !m.duration.trim(),
+    );
+
   const decided =
     kase.review_status === 'APPROVED' ||
     kase.review_status === 'MODIFIED' ||
@@ -707,6 +717,14 @@ function CaseReview({
               )}
             </ul>
 
+            {editing && medicationsInvalid && (
+              <p className="mt-3 text-[13px] text-risk-urgent">
+                {medications.length === 0
+                  ? 'Add at least one medication before releasing this prescription.'
+                  : 'Every medication needs a name, dosage, frequency and duration — a blank field will be rejected.'}
+              </p>
+            )}
+
             <div className="mt-4">
               <span className="label-meta">General instructions</span>
               {editing ? (
@@ -916,7 +934,12 @@ function CaseReview({
                 </button>
                 <button
                   onClick={() => run('MODIFY')}
-                  disabled={busy || medications.length === 0}
+                  disabled={busy || medicationsInvalid}
+                  title={
+                    medicationsInvalid
+                      ? 'Every medication needs a name, dosage, frequency and duration before this can be released.'
+                      : undefined
+                  }
                   className="btn-primary"
                 >
                   Save & release

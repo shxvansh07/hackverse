@@ -23,6 +23,7 @@ import {
   api,
   type Appointment,
   type ChatMessage,
+  type ClinicInfo,
   type Language,
   type PatientStatus,
   type PresentedPrescription,
@@ -82,6 +83,7 @@ export default function PatientPage() {
   const [bookingAppointment, setBookingAppointment] = useState(false);
 
   const [visitReport, setVisitReport] = useState<string | null>(null);
+  const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
 
   const speechRef = useRef<SpeechInput | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -96,6 +98,10 @@ export default function PatientPage() {
       .listLanguages()
       .then(setLanguages)
       .catch(() => setError('Could not load languages. Is the clinical service running?'));
+    // Best-effort: only needed for the printable prescription's letterhead,
+    // not for anything else on this page — a failure here shouldn't block
+    // the actual clinical flow.
+    api.getClinicInfo().then(setClinicInfo).catch(() => {});
     speechRef.current = new SpeechInput();
     return () => {
       speechRef.current?.stop();
@@ -331,8 +337,8 @@ export default function PatientPage() {
   }
 
   return (
-    <div className="min-h-screen bg-paper">
-      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur">
+    <div className="min-h-screen bg-paper print:min-h-0 print:bg-white">
+      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 py-3">
           <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
             Clinical Assistant
@@ -347,7 +353,7 @@ export default function PatientPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-5 pb-32 pt-6">
+      <main className="mx-auto max-w-2xl px-5 pb-32 pt-6 print:max-w-none print:p-0">
         {phase === 'conversation' && (
           <Conversation
             messages={messages}
@@ -382,6 +388,8 @@ export default function PatientPage() {
             activeLanguage={prescriptionLang}
             loading={loadingPrescription}
             onLanguageChange={changePrescriptionLanguage}
+            clinicInfo={clinicInfo}
+            patientId={clinicalState?.patient_id ?? null}
           />
         )}
 
@@ -846,37 +854,192 @@ function VisitReportView({ report, language }: { report: string; language: Langu
 
 /* ====================================================================== */
 
+/**
+ * Standard prescription-pad layout for printing/PDF export. `hidden
+ * print:block` — invisible on screen, only enters the DOM's rendered layout
+ * when printing (see globals.css for the accompanying @page rule). Always
+ * English/canonical, regardless of the on-screen display language: this is
+ * the document a pharmacist reads, not a patient-facing translation.
+ *
+ * Deliberately plain black-on-white with rules instead of the app's colour
+ * system — background colours are not reliable in print output unless the
+ * user has "background graphics" enabled, so nothing here depends on one.
+ */
+function PrintablePrescription({
+  prescription,
+  clinicInfo,
+  patientId,
+}: {
+  prescription: PresentedPrescription;
+  clinicInfo: ClinicInfo | null;
+  patientId: string | null;
+}) {
+  const approvedAt = prescription.approved_at ? new Date(prescription.approved_at) : null;
+
+  return (
+    <div className="hidden print:block print:text-black">
+      <header className="border-b-2 border-black pb-3">
+        <h1 className="text-xl font-bold">
+          {clinicInfo?.hospital_name ?? 'Clinical Assistant General Hospital'}
+        </h1>
+        <p className="mt-1 text-[12px]">{clinicInfo?.hospital_address}</p>
+        <p className="text-[12px]">
+          {clinicInfo?.hospital_phone}
+          {clinicInfo?.hospital_registration_no &&
+            ` · Reg. No: ${clinicInfo.hospital_registration_no}`}
+        </p>
+      </header>
+
+      <div className="mt-4 flex justify-between text-[13px]">
+        <div>
+          <p>
+            <span className="font-semibold">Patient ID:</span> {patientId ?? '—'}
+          </p>
+          <p>
+            <span className="font-semibold">Prescription ID:</span>{' '}
+            {prescription.prescription_id}
+          </p>
+        </div>
+        <div className="text-right">
+          <p>
+            <span className="font-semibold">Date:</span>{' '}
+            {(approvedAt ?? new Date()).toLocaleDateString()}
+          </p>
+          <p>
+            <span className="font-semibold">Status:</span>{' '}
+            {prescription.status === 'MODIFIED' ? 'Approved (modified by doctor)' : 'Approved'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <p className="text-2xl font-serif">℞</p>
+        <table className="mt-2 w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-black text-left">
+              <th className="py-1 pr-2">Medicine</th>
+              <th className="py-1 pr-2">Dosage</th>
+              <th className="py-1 pr-2">Frequency</th>
+              <th className="py-1 pr-2">Duration</th>
+              <th className="py-1">Instructions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {prescription.medications.map((med, index) => (
+              <tr key={`${med.name}-${index}`} className="border-b border-rule">
+                <td className="py-2 pr-2 font-semibold">{med.name}</td>
+                <td className="py-2 pr-2 font-mono">{med.dosage}</td>
+                <td className="py-2 pr-2">{med.frequency}</td>
+                <td className="py-2 pr-2">{med.duration}</td>
+                <td className="py-2">{med.instructions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {prescription.instructions && (
+        <div className="mt-4 text-[13px]">
+          <p className="font-semibold">General advice</p>
+          <p className="mt-1">{prescription.instructions}</p>
+        </div>
+      )}
+
+      {prescription.doctor_notes && (
+        <div className="mt-4 text-[13px]">
+          <p className="font-semibold">Note from your doctor</p>
+          <p className="mt-1">{prescription.doctor_notes}</p>
+        </div>
+      )}
+
+      <div className="mt-16 flex justify-end">
+        <div className="w-64 text-right text-[13px]">
+          <p
+            className="text-2xl italic"
+            style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}
+          >
+            {prescription.doctor_name ?? clinicInfo?.doctor_name ?? 'Attending Physician'}
+          </p>
+          <div className="mt-1 border-t border-black pt-1">
+            <p className="font-semibold">
+              {prescription.doctor_name ?? clinicInfo?.doctor_name}
+            </p>
+            {clinicInfo?.doctor_qualification && <p>{clinicInfo.doctor_qualification}</p>}
+            {clinicInfo?.doctor_registration_no && (
+              <p>Reg. No: {clinicInfo.doctor_registration_no}</p>
+            )}
+            {approvedAt && (
+              <p className="mt-1 text-[11px]">
+                Digitally authenticated · {approvedAt.toLocaleString()}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-10 border-t border-black pt-2 text-[10px] leading-relaxed">
+        This is a digitally generated prescription, reviewed and approved by the physician named
+        above. Medicine names, dosages and durations are reproduced exactly as approved. Prepared
+        via a multilingual clinical intake assistant; the assistant does not diagnose or
+        prescribe — every clinical decision on this document was made by the physician.
+      </p>
+    </div>
+  );
+}
+
 function PrescriptionView({
   prescription,
   languages,
   activeLanguage,
   loading,
   onLanguageChange,
+  clinicInfo,
+  patientId,
 }: {
   prescription: PresentedPrescription;
   languages: Language[];
   activeLanguage: string;
   loading: boolean;
   onLanguageChange: (code: string) => void;
+  clinicInfo: ClinicInfo | null;
+  patientId: string | null;
 }) {
   const localised = activeLanguage !== 'en';
 
   return (
-    <div className="animate-rise space-y-8">
-      <div>
-        <p className="label-meta text-risk-low">Approved by your doctor</p>
-        <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
-        {prescription.doctor_name && (
-          <p className="mt-2 text-[13px] text-ink-muted">
-            Reviewed by {prescription.doctor_name}
-            {prescription.approved_at &&
-              ` · ${new Date(prescription.approved_at).toLocaleString()}`}
-          </p>
-        )}
-      </div>
+    <>
+      {/* Only present in the DOM for print (see globals.css's print rules) —
+          a `print:hidden` ancestor would hide this too if it were nested
+          inside the screen-only block below, so it's a sibling instead.
+          Always English/canonical: a printed prescription handed to a
+          pharmacist should read exactly as the doctor approved it, not in
+          whatever display language happened to be selected on screen. */}
+      <PrintablePrescription
+        prescription={prescription}
+        clinicInfo={clinicInfo}
+        patientId={patientId}
+      />
 
-      <div>
-        <h2 className="label-meta">Show in</h2>
+      <div className="animate-rise space-y-8 print:hidden">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="label-meta text-risk-low">Approved by your doctor</p>
+            <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
+            {prescription.doctor_name && (
+              <p className="mt-2 text-[13px] text-ink-muted">
+                Reviewed by {prescription.doctor_name}
+                {prescription.approved_at &&
+                  ` · ${new Date(prescription.approved_at).toLocaleString()}`}
+              </p>
+            )}
+          </div>
+          <button onClick={() => window.print()} className="btn-secondary shrink-0">
+            Print / Download PDF
+          </button>
+        </div>
+
+        <div>
+          <h2 className="label-meta">Show in</h2>
         <div className="mt-2 flex flex-wrap gap-px border border-rule bg-rule">
           {languages.map((lang) => (
             <button
@@ -990,10 +1153,11 @@ function PrescriptionView({
         </section>
       )}
 
-      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
-        Take this exactly as written. If your symptoms get worse or you feel unwell in a new
-        way, contact your doctor or seek urgent care.
-      </p>
-    </div>
+        <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
+          Take this exactly as written. If your symptoms get worse or you feel unwell in a new
+          way, contact your doctor or seek urgent care.
+        </p>
+      </div>
+    </>
   );
 }

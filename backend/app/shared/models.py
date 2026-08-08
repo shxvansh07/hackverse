@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def _now() -> str:
@@ -98,11 +98,23 @@ class PatientStatus(str, Enum):
 # ---------------------------------------------------------------------------
 
 class Medication(BaseModel):
-    name: str = Field(..., description="Generic or trade name. Never translated.")
-    dosage: str = Field(..., description="e.g. 500 mg")
-    frequency: str = Field(..., description="e.g. Every 6 to 8 hours as needed")
-    duration: str = Field(..., description="e.g. 3-5 days")
+    # min_length=1 alone is not enough — Pydantic checks raw string length,
+    # so "   " would pass. A doctor-submitted medication with a blank dose or
+    # duration reaching a patient is a real defect, not a cosmetic one, so
+    # this is enforced here rather than trusted to the frontend form.
+    name: str = Field(..., min_length=1, description="Generic or trade name. Never translated.")
+    dosage: str = Field(..., min_length=1, description="e.g. 500 mg")
+    frequency: str = Field(..., min_length=1, description="e.g. Every 6 to 8 hours as needed")
+    duration: str = Field(..., min_length=1, description="e.g. 3-5 days")
     instructions: str = Field(default="", description="e.g. Take after food with water")
+
+    @field_validator("name", "dosage", "frequency", "duration")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
 
 class ReferralInfo(BaseModel):

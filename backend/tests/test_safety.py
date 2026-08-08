@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from pydantic import ValidationError
 
 os.environ.setdefault("PERSIST_STATE", "0")
 os.environ.setdefault("SEED_DEMO_DATA", "0")
@@ -311,6 +312,30 @@ def test_medication_preserved_passes():
                      duration="3 days", instructions="After food")
     intact = {"name": "Paracetamol", "dosage": "500 mg", "duration": "3 days"}
     assert guards.verify_medication_preserved(med, intact).allowed is True
+
+
+@pytest.mark.parametrize("field", ["name", "dosage", "frequency", "duration"])
+def test_medication_rejects_a_blank_required_field(field):
+    """Regression test: a doctor's MODIFY submission with an incomplete row
+    (e.g. a medication name typed but dosage left blank) used to be accepted
+    — Medication's fields were `str` with no min_length, so an empty string
+    satisfied the type check. A prescription reaching a patient with a blank
+    dose or duration is a real defect, not cosmetic."""
+    values = dict(name="Paracetamol", dosage="500 mg", frequency="Twice daily", duration="3 days")
+    values[field] = ""
+    with pytest.raises(ValidationError):
+        Medication(**values)
+
+
+def test_medication_rejects_a_whitespace_only_field():
+    """min_length alone would let '   ' through — must be checked after strip."""
+    with pytest.raises(ValidationError):
+        Medication(name="   ", dosage="500 mg", frequency="Twice daily", duration="3 days")
+
+
+def test_medication_trims_surrounding_whitespace():
+    med = Medication(name="  Paracetamol  ", dosage="500 mg", frequency="Twice daily", duration="3 days")
+    assert med.name == "Paracetamol"
 
 
 # ---------------------------------------------------------------------------
