@@ -122,6 +122,34 @@ def test_llm_hint_cannot_clear_a_red_flag():
     assert result.risk_state == RiskState.URGENT
 
 
+def test_self_reported_severe_yields_uncertain_without_a_red_flag():
+    """The red-flag list is a fixed set of dangerous phrases; it will not
+    catch every way a patient signals something feels serious. A patient
+    explicitly describing their own symptoms as severe still routes to
+    doctor review even when nothing else in the case looks alarming."""
+    result = _complete_case(severity="Severe")
+    assert result.risk_state == RiskState.UNCERTAIN
+    assert not result.eligible_for_draft
+
+
+def test_self_reported_mild_does_not_force_uncertain():
+    result = _complete_case(severity="Mild")
+    assert result.risk_state == RiskState.LOW_RISK
+
+
+def test_self_reported_severe_never_overrides_an_actual_red_flag():
+    """Self-reported severity is additive, never a substitute for or a
+    downgrade of the red-flag check — a red flag alone is enough for URGENT
+    regardless of what the severity field says."""
+    result = engine.assess(
+        symptoms=["chest pain"], associated_symptoms=[],
+        raw_text="I have chest pain", duration="1 hour",
+        allergies_confirmed=True, history_confirmed=True,
+        severity="Mild",
+    )
+    assert result.risk_state == RiskState.URGENT
+
+
 def test_complete_low_risk_case_is_eligible():
     result = _complete_case()
     assert result.risk_state == RiskState.LOW_RISK

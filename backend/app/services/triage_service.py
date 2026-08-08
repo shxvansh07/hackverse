@@ -182,6 +182,7 @@ class TriageService:
             history_confirmed=case.history_confirmed,
             llm_hints=llm_hints,
             transcript_text=case.transcript_text(),
+            severity=case.severity,
         )
 
         case.triage_status = assessment.risk_state

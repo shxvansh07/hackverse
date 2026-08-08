@@ -228,6 +228,7 @@ def assess(
     history_confirmed: bool = False,
     llm_hints: Sequence[str] = (),
     transcript_text: str = "",
+    severity: str = "",
 ) -> SafetyAssessment:
     """Classify a case as URGENT, UNCERTAIN or LOW_RISK.
 
@@ -284,6 +285,19 @@ def assess(
     # 5. UNCERTAIN — symptom burden out of proportion to a routine presentation.
     if len(set(symptoms)) >= 6:
         reasons.append("Unusually broad symptom cluster; warrants clinician review")
+
+    # 6. UNCERTAIN — the patient described this as severe themselves, even
+    #    though nothing matched the configured red-flag list. The red-flag
+    #    list is a fixed set of dangerous phrases; it will not catch every
+    #    way a patient signals that something feels serious. Extraction
+    #    normalises this field to exactly "Severe"/"Moderate"/"Mild" (see
+    #    ai/schemas.py), so this is an exact match, not a fuzzy one.
+    if severity == "Severe":
+        reasons.append(
+            "Patient described their own symptoms as severe; no configured "
+            "red flag matched, but self-reported severity still warrants "
+            "clinician review rather than an unattended draft."
+        )
 
     if reasons:
         return SafetyAssessment(
