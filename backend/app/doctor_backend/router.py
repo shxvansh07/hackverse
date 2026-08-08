@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
-from app.shared.auth import authenticate, require_doctor, resolve_token
+from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
 from app.shared.database import db
 from app.shared.models import (
     ConsultationTurn,
@@ -41,7 +41,18 @@ router = APIRouter(tags=["doctor"])
 
 @router.post("/api/auth/doctor/login", response_model=DoctorLoginResponse)
 def doctor_login(payload: DoctorLoginRequest):
-    record = authenticate(payload.username, payload.password)
+    try:
+        record = authenticate(payload.username, payload.password)
+    except AccountLockedError as exc:
+        minutes = max(1, (exc.retry_after_seconds + 59) // 60)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many failed sign-in attempts. Try again in about "
+                f"{minutes} minute{'s' if minutes != 1 else ''}."
+            ),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
     if not record:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return DoctorLoginResponse(**record)

@@ -82,8 +82,13 @@ def test_bad_credentials_rejected():
 def test_repeated_failed_logins_lock_out_even_correct_credentials():
     """Brute-force protection: enough wrong attempts against one username
     locks it out for a cooldown window, regardless of what is tried next —
-    including the real password. Explicitly restores auth module state
-    afterwards so later tests' auth_headers() fixture is unaffected."""
+    including the real password. The locked-out response is a distinct 429
+    with a "try again in N minutes" message, not the same generic 401 as a
+    plain wrong password — conflating the two is confusing in practice (a
+    doctor who mistypes their password a few times can no longer tell
+    "locked out" from "wrong password" when they then type it correctly).
+    Explicitly restores auth module state afterwards so later tests'
+    auth_headers() fixture is unaffected."""
     from app.shared import auth as auth_module
 
     saved_attempts = dict(auth_module._FAILED_ATTEMPTS)
@@ -97,11 +102,13 @@ def test_repeated_failed_logins_lock_out_even_correct_credentials():
             )
             assert resp.status_code == 401
 
-        # One more attempt, this time with the real password — still locked out.
+        # One more attempt, this time with the real password — still locked
+        # out, but distinguishably so (429, not 401).
         resp = client.post(
             "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
         )
-        assert resp.status_code == 401
+        assert resp.status_code == 429
+        assert "try again" in resp.json()["detail"].lower()
     finally:
         auth_module._FAILED_ATTEMPTS.clear()
         auth_module._FAILED_ATTEMPTS.update(saved_attempts)
