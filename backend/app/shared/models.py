@@ -157,6 +157,41 @@ class SafetySignal(BaseModel):
     evaluated_at: str = Field(default_factory=_now)
 
 
+class ConsultationTurn(BaseModel):
+    """One utterance in a live face-to-face consultation, captured both as
+    said and as translated. Both sides are kept so the transcript is legible
+    to a reviewer in either language."""
+
+    speaker: str  # "doctor" | "patient"
+    original_text: str
+    original_lang: str
+    translated_text: str
+    translated_lang: str
+    timestamp: str = Field(default_factory=_now)
+
+
+class LiveConsultation(BaseModel):
+    """An in-person visit, real-time-interpreted on one shared device.
+
+    Booking (Appointment) and holding this consultation are deliberately
+    separate concerns — a consultation can be started against a case with any
+    kind of appointment, or resumed, without re-touching booking state.
+    """
+
+    consultation_id: str = Field(default_factory=lambda: _new_id("CONSULT"))
+    case_id: str
+    doctor_id: str = "DR-101"
+    doctor_name: str = "Dr. Sharma, MD"
+    patient_lang: str = "en"
+    status: str = "IN_PROGRESS"  # "IN_PROGRESS" | "COMPLETED"
+    turns: List[ConsultationTurn] = Field(default_factory=list)
+    report_en: Optional[str] = None
+    report_translated: Optional[str] = None
+    report_lang: Optional[str] = None
+    started_at: str = Field(default_factory=_now)
+    ended_at: Optional[str] = None
+
+
 class AuditEvent(BaseModel):
     """Append-only record. Never mutated, never deleted."""
 
@@ -270,6 +305,7 @@ class TriageCase(BaseModel):
     prescription_id: Optional[str] = None
     appointment_id: Optional[str] = None
     referral: Optional[ReferralInfo] = None
+    consultation_id: Optional[str] = None
     grounding: Dict[str, Any] = Field(default_factory=dict)
     handed_off: bool = False
     handed_off_at: Optional[str] = None
@@ -373,6 +409,17 @@ class BookAppointmentRequest(BaseModel):
     specialty: Optional[str] = None
 
 
+class StartConsultationRequest(BaseModel):
+    case_id: str
+
+
+class ConsultationTurnRequest(BaseModel):
+    speaker: str  # "doctor" | "patient"
+    text: str = Field(..., min_length=1, max_length=2000)
+    source_lang: str
+    target_lang: str
+
+
 class DoctorDecisionRequest(BaseModel):
     decision: DecisionType
     notes: Optional[str] = None
@@ -455,3 +502,6 @@ class PatientStatusResponse(BaseModel):
     recommend_appointment: bool = False
     recommended_specialty: Optional[str] = None
     appointment: Optional[Appointment] = None
+    visit_report_available: bool = False
+    visit_report: Optional[str] = None
+    visit_report_lang: Optional[str] = None

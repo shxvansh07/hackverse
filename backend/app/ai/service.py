@@ -238,6 +238,52 @@ class AIService:
             # Bare prose is acceptable; a stray JSON fragment is not.
             return candidate if candidate and not candidate.startswith("{") else None
 
+    async def translate_dialogue(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> Optional[str]:
+        """Translate one utterance of live doctor<->patient conversation.
+
+        Deliberately separate from translate(): that method assumes the
+        source is always English (true for prescriptions, the only existing
+        caller) and short-circuits when the target is English. A live
+        consultation needs both directions, so this method never assumes
+        which side is English and always calls the model when the two
+        language codes differ.
+        """
+        if not text.strip():
+            return ""
+        source = resolve(source_lang)
+        target = resolve(target_lang)
+        if source.code == target.code:
+            return text
+
+        response = await self._complete(
+            prompts.build_dialogue_translation_messages(text, source.code, target.code),
+            json_mode=True, temperature=0.0, max_tokens=500,
+        )
+        if response is None:
+            return None
+
+        try:
+            validated = TranslatedText.model_validate(extract_json_object(response.text))
+            return validated.text or None
+        except (ValueError, ValidationError):
+            candidate = response.text.strip()
+            return candidate if candidate and not candidate.startswith("{") else None
+
+    async def generate_visit_report(
+        self, prior_summary: str, exchange_lines: List[str]
+    ) -> Optional[str]:
+        """English clinical note for a concluded in-person consultation."""
+        response = await self._complete(
+            prompts.build_visit_report_messages(prior_summary, exchange_lines),
+            temperature=0.1, max_tokens=320,
+        )
+        if response is None:
+            return None
+        note = " ".join(response.text.split())
+        return note or None
+
 
 #: Process-wide instance. Constructed once at import so the provider chain is
 #: reported accurately by /api/health at startup.

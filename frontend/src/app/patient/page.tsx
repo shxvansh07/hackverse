@@ -45,7 +45,7 @@ import {
   cx,
 } from '@/components/ui/clinical';
 
-type Phase = 'language' | 'conversation' | 'waiting' | 'prescription';
+type Phase = 'language' | 'conversation' | 'waiting' | 'prescription' | 'visit-report';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -80,6 +80,8 @@ export default function PatientPage() {
   const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [bookingAppointment, setBookingAppointment] = useState(false);
+
+  const [visitReport, setVisitReport] = useState<string | null>(null);
 
   const speechRef = useRef<SpeechInput | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -123,6 +125,15 @@ export default function PatientPage() {
         setRecommendAppointment(status.recommend_appointment);
         setRecommendedSpecialty(status.recommended_specialty);
         if (status.appointment) setAppointment(status.appointment);
+
+        // A completed in-person consultation is the most recent, most
+        // complete outcome available — it takes priority over the async
+        // prescription track, which a case may or may not also have.
+        if (status.visit_report_available && status.visit_report) {
+          setVisitReport(status.visit_report);
+          setPhase('visit-report');
+          return;
+        }
 
         if (status.rejected) {
           setReviewRejected(true);
@@ -373,6 +384,10 @@ export default function PatientPage() {
             loading={loadingPrescription}
             onLanguageChange={changePrescriptionLanguage}
           />
+        )}
+
+        {phase === 'visit-report' && visitReport && (
+          <VisitReportView report={visitReport} language={language} />
         )}
       </main>
 
@@ -839,6 +854,29 @@ function WaitingRoom({
 
       <p className="mt-10 max-w-reading text-[13px] leading-relaxed text-ink-faint">
         Nothing has been prescribed yet. Only a doctor can issue your prescription.
+      </p>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+function VisitReportView({ report, language }: { report: string; language: Language | null }) {
+  return (
+    <div className="animate-rise space-y-6">
+      <div>
+        <p className="label-meta text-risk-low">From your in-person visit</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">Visit report</h1>
+      </div>
+      <p
+        className="max-w-reading whitespace-pre-wrap text-body leading-relaxed text-ink"
+        lang={language?.code}
+      >
+        {report}
+      </p>
+      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
+        This is a record of your consultation, not a prescription. If your doctor prescribed
+        anything during the visit, they will have given it to you directly.
       </p>
     </div>
   );

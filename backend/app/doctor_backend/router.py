@@ -13,18 +13,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 
 from app.safety import guards
 from app.services.case_service import CaseService
+from app.services.consultation_service import ConsultationService
 from app.shared.auth import authenticate, require_doctor, resolve_token
 from app.shared.database import db
 from app.shared.models import (
+    ConsultationTurn,
+    ConsultationTurnRequest,
     DecisionType,
     DoctorDecisionRequest,
     DoctorDecisionResponse,
     DoctorLoginRequest,
     DoctorLoginResponse,
+    LiveConsultation,
     Prescription,
     PrescriptionStatus,
     PrescriptionUpdateRequest,
     ReviewStatus,
+    StartConsultationRequest,
     TriageCase,
 )
 from app.websocket.manager import WSEvent, case_queue_payload, ws_manager
@@ -105,6 +110,7 @@ def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(requir
         "draft_block_reason": case.grounding.get("block_reason") if case.grounding else None,
         "appointment": db.get_appointment(case.appointment_id) if case.appointment_id else None,
         "referral": case.referral,
+        "consultation": db.get_consultation(case.consultation_id) if case.consultation_id else None,
     }
 
 
@@ -237,3 +243,78 @@ def get_case_audit(case_id: str, doctor: Dict[str, str] = Depends(require_doctor
     if not db.get_case(case_id):
         raise HTTPException(status_code=404, detail="Case not found")
     return {"case_id": case_id, "events": db.audit_for_case(case_id)}
+
+
+# --------------------------------------------------------------------------
+# Live face-to-face consultation
+#
+# One shared device, used together by doctor and patient in the room. Every
+# call here is doctor-driven — there is no separate patient-side device in
+# this flow, unlike the async intake above.
+# --------------------------------------------------------------------------
+
+@router.post("/api/doctor/consultations/start", response_model=LiveConsultation)
+def start_consultation(
+    payload: StartConsultationRequest, doctor: Dict[str, str] = Depends(require_doctor)
+):
+    """Create a consultation for this case, or return the existing one."""
+    case = db.get_case(payload.case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return ConsultationService.start(case)
+
+
+@router.get("/api/doctor/consultations/{consultation_id}", response_model=LiveConsultation)
+def get_consultation(consultation_id: str, doctor: Dict[str, str] = Depends(require_doctor)):
+    """Resume/refresh — read current state of an in-progress or closed consultation."""
+    consultation = db.get_consultation(consultation_id)
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    return consultation
+
+
+@router.post(
+    "/api/doctor/consultations/{consultation_id}/turn",
+    response_model=ConsultationTurn,
+)
+async def add_consultation_turn(
+    consultation_id: str,
+    payload: ConsultationTurnRequest,
+    doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Translate one utterance and append it to the running transcript.
+
+    Returns the turn immediately so the caller can speak translated_text
+    aloud without waiting for anything else.
+    """
+    consultation = db.get_consultation(consultation_id)
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    if consultation.status != "IN_PROGRESS":
+        raise HTTPException(status_code=409, detail="Consultation has already ended")
+
+    return await ConsultationService.add_turn(
+        consultation,
+        speaker=payload.speaker,
+        text=payload.text.strip(),
+        source_lang=payload.source_lang,
+        target_lang=payload.target_lang,
+    )
+
+
+@router.post("/api/doctor/consultations/{consultation_id}/end", response_model=LiveConsultation)
+async def end_consultation(
+    consultation_id: str, doctor: Dict[str, str] = Depends(require_doctor)
+):
+    """Generate the English report + translated version, close the consultation."""
+    consultation = db.get_consultation(consultation_id)
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    if consultation.status != "IN_PROGRESS":
+        return consultation
+
+    case = db.get_case(consultation.case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    return await ConsultationService.end(consultation, case)

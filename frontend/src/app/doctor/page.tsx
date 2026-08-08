@@ -406,7 +406,8 @@ function CaseReview({
     },
   ) => Promise<void>;
 }) {
-  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral } = detail;
+  const router = useRouter();
+  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation } = detail;
 
   const [notes, setNotes] = useState('');
   const [editing, setEditing] = useState(false);
@@ -773,6 +774,27 @@ function CaseReview({
             <p className="mt-1 text-[14px] text-ink">
               {appointment.type} · {appointment.slot_time} · {appointment.clinic_location}
             </p>
+          </div>
+        )}
+
+        {appointment && (
+          <div className="mt-4 flex items-center justify-between border border-rule bg-surface px-4 py-3">
+            <div>
+              <p className="label-meta">Face-to-face consultation</p>
+              <p className="mt-1 text-[13px] text-ink-muted">
+                {consultation?.status === 'COMPLETED'
+                  ? 'Completed — report generated.'
+                  : consultation?.status === 'IN_PROGRESS'
+                    ? 'In progress — resume on the doctor\'s device.'
+                    : 'For when the patient is here in person: real-time interpreted, scribed, ends in a report.'}
+              </p>
+            </div>
+            <button
+              onClick={() => router.push(`/doctor/consultation/${kase.case_id}`)}
+              className="btn-secondary shrink-0"
+            >
+              {consultation?.status === 'IN_PROGRESS' ? 'Resume' : consultation?.status === 'COMPLETED' ? 'View' : 'Start consultation'}
+            </button>
           </div>
         )}
 

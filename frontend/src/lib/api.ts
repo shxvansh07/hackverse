@@ -94,6 +94,33 @@ export interface Appointment {
   created_at: string;
 }
 
+/** One utterance in a live face-to-face consultation, kept both as said and
+ *  as translated so the transcript is legible in either language. */
+export interface ConsultationTurn {
+  speaker: 'doctor' | 'patient';
+  original_text: string;
+  original_lang: string;
+  translated_text: string;
+  translated_lang: string;
+  timestamp: string;
+}
+
+/** An in-person visit, real-time-interpreted on one shared device. */
+export interface LiveConsultation {
+  consultation_id: string;
+  case_id: string;
+  doctor_id: string;
+  doctor_name: string;
+  patient_lang: string;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  turns: ConsultationTurn[];
+  report_en: string | null;
+  report_translated: string | null;
+  report_lang: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
 export interface TriageCase {
   case_id: string;
   session_id: string;
@@ -121,6 +148,7 @@ export interface TriageCase {
   prescription_id: string | null;
   appointment_id: string | null;
   referral: ReferralInfo | null;
+  consultation_id: string | null;
   grounding: Record<string, unknown>;
   handed_off: boolean;
   handed_off_at: string | null;
@@ -233,6 +261,9 @@ export interface PatientStatusResponse {
   recommend_appointment: boolean;
   recommended_specialty: string | null;
   appointment: Appointment | null;
+  visit_report_available: boolean;
+  visit_report: string | null;
+  visit_report_lang: string | null;
 }
 
 export interface CaseDetail {
@@ -245,6 +276,7 @@ export interface CaseDetail {
   draft_block_reason: string | null;
   appointment: Appointment | null;
   referral: ReferralInfo | null;
+  consultation: LiveConsultation | null;
 }
 
 export interface AuditEvent {
@@ -469,6 +501,46 @@ export const api = {
     request<Prescription>(
       `/api/prescriptions/${prescriptionId}`,
       { method: 'PATCH', body: JSON.stringify(payload) },
+      true,
+    ),
+
+  // ---------------------------------------------------- live consultation
+
+  /** Doctor-driven: single shared device, so all four calls sit under the
+   *  doctor auth boundary even though the outcome (the report) reaches the
+   *  patient too, via patientStatus() above. */
+  startConsultation: (caseId: string) =>
+    request<LiveConsultation>(
+      '/api/doctor/consultations/start',
+      { method: 'POST', body: JSON.stringify({ case_id: caseId }) },
+      true,
+    ),
+
+  getConsultation: (consultationId: string) =>
+    request<LiveConsultation>(`/api/doctor/consultations/${consultationId}`, {}, true),
+
+  submitConsultationTurn: (
+    consultationId: string,
+    turn: { speaker: 'doctor' | 'patient'; text: string; sourceLang: string; targetLang: string },
+  ) =>
+    request<ConsultationTurn>(
+      `/api/doctor/consultations/${consultationId}/turn`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          speaker: turn.speaker,
+          text: turn.text,
+          source_lang: turn.sourceLang,
+          target_lang: turn.targetLang,
+        }),
+      },
+      true,
+    ),
+
+  endConsultation: (consultationId: string) =>
+    request<LiveConsultation>(
+      `/api/doctor/consultations/${consultationId}/end`,
+      { method: 'POST' },
       true,
     ),
 

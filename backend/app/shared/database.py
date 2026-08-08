@@ -27,6 +27,7 @@ from app.shared.models import (
     Appointment,
     AuditEvent,
     ChatMessage,
+    LiveConsultation,
     PatientSession,
     PatientStatus,
     Prescription,
@@ -57,6 +58,7 @@ class ClinicalStore:
         self.cases: Dict[str, TriageCase] = {}
         self.prescriptions: Dict[str, Prescription] = {}
         self.appointments: Dict[str, Appointment] = {}
+        self.consultations: Dict[str, LiveConsultation] = {}
         self.audit: List[AuditEvent] = []
 
         self._persist = persist and os.getenv("PERSIST_STATE", "1") != "0"
@@ -90,6 +92,7 @@ class ClinicalStore:
             "cases": {k: v.model_dump() for k, v in self.cases.items()},
             "prescriptions": {k: v.model_dump() for k, v in self.prescriptions.items()},
             "appointments": {k: v.model_dump() for k, v in self.appointments.items()},
+            "consultations": {k: v.model_dump() for k, v in self.consultations.items()},
         }
         target = self._state_path()
         try:
@@ -126,13 +129,19 @@ class ClinicalStore:
                 k: Appointment.model_validate(v)
                 for k, v in payload.get("appointments", {}).items()
             }
+            self.consultations = {
+                k: LiveConsultation.model_validate(v)
+                for k, v in payload.get("consultations", {}).items()
+            }
             logger.info(
-                "Restored %d sessions, %d cases, %d prescriptions, %d appointments",
-                len(self.sessions), len(self.cases), len(self.prescriptions), len(self.appointments),
+                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations",
+                len(self.sessions), len(self.cases), len(self.prescriptions),
+                len(self.appointments), len(self.consultations),
             )
         except Exception as exc:  # noqa: BLE001 - a bad snapshot must not block boot
             logger.error("State snapshot incompatible, starting empty: %s", exc)
-            self.sessions, self.cases, self.prescriptions, self.appointments = {}, {}, {}, {}
+            self.sessions, self.cases, self.prescriptions = {}, {}, {}
+            self.appointments, self.consultations = {}, {}
 
     # ----------------------------------------------------------------- audit
 
@@ -201,6 +210,12 @@ class ClinicalStore:
             self._save()
         return appointment
 
+    def save_consultation(self, consultation: LiveConsultation) -> LiveConsultation:
+        with self._lock:
+            self.consultations[consultation.consultation_id] = consultation
+            self._save()
+        return consultation
+
     # -------------------------------------------------------------- queries
 
     def get_session(self, session_id: str) -> Optional[PatientSession]:
@@ -226,6 +241,15 @@ class ClinicalStore:
 
     def get_appointment(self, appointment_id: str) -> Optional[Appointment]:
         return self.appointments.get(appointment_id)
+
+    def get_consultation(self, consultation_id: str) -> Optional[LiveConsultation]:
+        return self.consultations.get(consultation_id)
+
+    def get_consultation_for_case(self, case_id: str) -> Optional[LiveConsultation]:
+        case = self.get_case(case_id)
+        if case and case.consultation_id:
+            return self.consultations.get(case.consultation_id)
+        return None
 
     def list_cases(
         self, risk_filter: Optional[str] = None, status_filter: Optional[str] = None,
@@ -253,6 +277,7 @@ class ClinicalStore:
             self.cases.clear()
             self.prescriptions.clear()
             self.appointments.clear()
+            self.consultations.clear()
             self.audit.clear()
 
     # ----------------------------------------------------------- demo seeds
