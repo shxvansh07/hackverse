@@ -32,6 +32,8 @@ export default function PatientPortal() {
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
+  const [specialistBookingLoading, setSpecialistBookingLoading] = useState(false);
 
   // VAD & Voice Call Engine State & REFS
   const [isCallActive, setIsCallActive] = useState(false);
@@ -107,6 +109,7 @@ export default function PatientPortal() {
       setPrescription(null);
       setAppointment(null);
       setReferral(null);
+      setRecommendedSpecialty(null);
     } catch (err) {
       console.error('Session start error:', err);
     } finally {
@@ -366,6 +369,10 @@ export default function PatientPortal() {
         setAppointment(res.auto_booked_appointment);
       }
 
+      if (res.recommended_specialty) {
+        setRecommendedSpecialty(res.recommended_specialty);
+      }
+
       const aiText = res.ai_response;
       setMessages((prev) => [
         ...prev,
@@ -444,6 +451,19 @@ export default function PatientPortal() {
       console.error('Booking error:', err);
     } finally {
       setBookingLoading(false);
+    }
+  };
+
+  const handleBookSpecialistAppointment = async () => {
+    if (!caseId || !recommendedSpecialty) return;
+    setSpecialistBookingLoading(true);
+    try {
+      const apt = await api.bookAppointment(caseId, undefined, undefined, recommendedSpecialty);
+      setAppointment(apt);
+    } catch (err) {
+      console.error('Specialist booking error:', err);
+    } finally {
+      setSpecialistBookingLoading(false);
     }
   };
 
@@ -565,6 +585,38 @@ export default function PatientPortal() {
                 <div>Time Slot: {appointment.slot_time}</div>
                 <div>Status: {appointment.status}</div>
                 <div>Ref ID: {appointment.appointment_id}</div>
+                {recommendedSpecialty && <div>Recommended Specialist: {recommendedSpecialty}</div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* UNCERTAIN — IN-PERSON SPECIALIST EVALUATION PROMPT */}
+        {triageStatus === 'UNCERTAIN' && (
+          <div className="bg-amber-50 border-2 border-amber-500 p-5 rounded-lg text-black space-y-3">
+            <h3 className="text-base font-bold uppercase tracking-wider text-amber-700">
+              In-Person Specialist Evaluation Recommended
+            </h3>
+            <p className="text-xs text-amber-900 leading-relaxed font-medium">
+              Your symptoms need an in-person evaluation for an accurate assessment.
+              {recommendedSpecialty && ` Recommended specialist: ${recommendedSpecialty}.`}
+            </p>
+
+            {!appointment ? (
+              <button
+                disabled={specialistBookingLoading || !recommendedSpecialty}
+                onClick={handleBookSpecialistAppointment}
+                className="px-4 py-2 bg-black text-white font-bold rounded text-xs hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {specialistBookingLoading ? 'Booking...' : 'Book In-Person Appointment'}
+              </button>
+            ) : (
+              <div className="bg-white p-3 rounded border border-amber-300 text-xs font-mono space-y-1">
+                <div className="font-bold text-amber-700">[IN-PERSON APPOINTMENT BOOKED]</div>
+                <div>Time Slot: {appointment.slot_time}</div>
+                <div>Location: {appointment.clinic_location}</div>
+                <div>Ref ID: {appointment.appointment_id}</div>
+                {appointment.specialty && <div>Specialist: {appointment.specialty}</div>}
               </div>
             )}
           </div>
@@ -692,7 +744,7 @@ export default function PatientPortal() {
           </div>
 
           {/* INPUT FORM */}
-          {triageStatus !== 'URGENT' && (
+          {triageStatus !== 'URGENT' && triageStatus !== 'UNCERTAIN' && (
             <form onSubmit={handleFormSubmit} className="mt-3 flex items-center space-x-2">
               <input
                 type="text"

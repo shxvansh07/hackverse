@@ -59,7 +59,7 @@ async def handle_triage_message(payload: TriageMessageRequest):
 
     db.cases[updated_case.case_id] = updated_case
 
-    if (is_complete or updated_case.triage_status == RiskState.LOW_RISK) and not updated_case.prescription_draft_id:
+    if updated_case.triage_status in (RiskState.LOW_RISK, RiskState.URGENT) and not updated_case.prescription_draft_id:
         draft_rx = RAGEngine.generate_draft_prescription(
             case_id=updated_case.case_id,
             symptoms=updated_case.symptoms,
@@ -86,7 +86,8 @@ async def handle_triage_message(payload: TriageMessageRequest):
         triage_status=updated_case.triage_status,
         missing_information=updated_case.missing_information,
         case_id=updated_case.case_id,
-        auto_booked_appointment=auto_apt
+        auto_booked_appointment=auto_apt,
+        recommended_specialty=updated_case.recommended_specialty
     )
 
 
@@ -125,13 +126,21 @@ def book_appointment(payload: BookAppointmentRequest):
     slot = payload.slot_time if payload.slot_time else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
     location = payload.clinic_location if payload.clinic_location else "Main OPD Clinic, Room 102"
 
+    if payload.specialty:
+        apt_type = AppointmentType.SPECIALIST_CONSULT
+    elif case.triage_status == RiskState.URGENT:
+        apt_type = AppointmentType.URGENT_EMERGENCY
+    else:
+        apt_type = AppointmentType.OPTIONAL_CONSULT
+
     apt = Appointment(
         case_id=case.case_id,
         patient_id=case.patient_id,
-        type=AppointmentType.OPTIONAL_CONSULT if case.triage_status != RiskState.URGENT else AppointmentType.URGENT_EMERGENCY,
+        type=apt_type,
         slot_time=slot,
         clinic_location=location,
-        notes="Patient requested consultation appointment"
+        notes="Patient requested consultation appointment",
+        specialty=payload.specialty
     )
     db.appointments[apt.appointment_id] = apt
     case.appointment_id = apt.appointment_id

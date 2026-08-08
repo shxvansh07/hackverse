@@ -28,6 +28,7 @@ class AppointmentType(str, Enum):
     OPTIONAL_CONSULT = "OPTIONAL_CONSULT"
     URGENT_EMERGENCY = "URGENT_EMERGENCY"
     DOCTOR_SCHEDULED_OFFLINE = "DOCTOR_SCHEDULED_OFFLINE"
+    SPECIALIST_CONSULT = "SPECIALIST_CONSULT"
 
 class Medication(BaseModel):
     name: str = Field(..., description="Medication generic or trade name")
@@ -80,6 +81,7 @@ class Appointment(BaseModel):
     clinic_location: str = "Main Hospital Clinic, Room 102"
     status: str = "CONFIRMED"
     notes: str = ""
+    specialty: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 class TriageCase(BaseModel):
@@ -96,6 +98,7 @@ class TriageCase(BaseModel):
     red_flags: List[str] = []
     missing_information: List[str] = []
     triage_status: RiskState = RiskState.LOW_RISK
+    recommended_specialty: Optional[str] = None
     review_status: str = "PENDING"
     summary_en: str = ""
     transcript: List[ChatMessage] = []
@@ -119,6 +122,7 @@ class BookAppointmentRequest(BaseModel):
     case_id: str
     slot_time: Optional[str] = None
     clinic_location: Optional[str] = None
+    specialty: Optional[str] = None
 
 class CreateSessionRequest(BaseModel):
     preferred_language: str = "en"
@@ -137,6 +141,7 @@ class TriageMessageResponse(BaseModel):
     missing_information: List[str]
     case_id: Optional[str] = None
     auto_booked_appointment: Optional[Appointment] = None
+    recommended_specialty: Optional[str] = None
 
 class DoctorDecisionRequest(BaseModel):
     decision: DecisionType

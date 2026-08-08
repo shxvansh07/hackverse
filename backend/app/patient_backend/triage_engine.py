@@ -2,7 +2,7 @@ import re
 from typing import Dict, Any, List, Tuple
 from datetime import datetime, timedelta
 from app.shared.models import TriageCase, ChatMessage, RiskState, Appointment, AppointmentType
-from app.patient_backend.safety_engine import evaluate_safety_triage
+from app.patient_backend.safety_engine import evaluate_safety_triage, recommend_specialty
 from app.patient_backend.ai_service import AIService
 from app.shared.database import db
 
@@ -129,12 +129,15 @@ class TriageEngine:
 
         # 1. Urgent Red Flag Handling
         if risk_state == RiskState.URGENT:
+            current_case.recommended_specialty = recommend_specialty(red_flags)
+
             auto_appointment = Appointment(
                 case_id=current_case.case_id,
                 patient_id=current_case.patient_id,
                 type=AppointmentType.URGENT_EMERGENCY,
                 slot_time=(datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M"),
-                notes=f"EMERGENCY AUTO-BOOKED: Red Flags {', '.join(red_flags)}"
+                notes=f"EMERGENCY AUTO-BOOKED: Red Flags {', '.join(red_flags)}",
+                specialty=current_case.recommended_specialty
             )
             db.appointments[auto_appointment.appointment_id] = auto_appointment
             current_case.appointment_id = auto_appointment.appointment_id
@@ -142,10 +145,12 @@ class TriageEngine:
             ai_reply = (
                 "⚠️ ध्यान दें: आपके बताए लक्षणों में तुरंत डॉक्टर देखभाल की आवश्यकता है। "
                 f"आपके लिए आपातकालीन डॉक्टर अपॉइंटमेंट स्वतः बुक कर दिया गया है (समय: {auto_appointment.slot_time})। "
+                f"अनुशंसित विशेषज्ञ: {current_case.recommended_specialty}। "
                 "कृपया बिना देरी किए आपातकालीन विभाग या डॉक्टर से तुरंत संपर्क करें।"
                 if lang == "hi" else
                 "⚠️ Warning: The symptoms you entered indicate a high-risk condition. "
                 f"An URGENT Doctor Emergency Appointment has been reserved for you (Slot: {auto_appointment.slot_time}). "
+                f"Recommended specialist: {current_case.recommended_specialty}. "
                 "Please proceed immediately to the nearest emergency room."
             )
 
@@ -153,7 +158,25 @@ class TriageEngine:
             current_case.summary_en = cls.build_english_summary(current_case)
             return current_case, ai_reply, True, auto_appointment
 
-        # 2. IMMEDIATE COMPLETION CHECK (If patient says 'nahi' / 'no' at ANY step after turn 1)
+        # 2. Uncertain / Ambiguous Cases: stop the conversation and point the
+        # patient at an in-person specialist instead of auto-booking or
+        # continuing to chat indefinitely.
+        if risk_state == RiskState.UNCERTAIN:
+            current_case.recommended_specialty = recommend_specialty(red_flags)
+
+            ai_reply = (
+                "आपके बताए लक्षणों को सही आकलन के लिए व्यक्तिगत जांच की आवश्यकता है। "
+                f"कृपया {current_case.recommended_specialty} विशेषज्ञ के साथ व्यक्तिगत अपॉइंटमेंट बुक करें।"
+                if lang == "hi" else
+                "Your symptoms need an in-person evaluation for an accurate assessment. "
+                f"Please book an in-person appointment with a {current_case.recommended_specialty} specialist."
+            )
+
+            current_case.transcript.append(ChatMessage(sender="ai", text=ai_reply))
+            current_case.summary_en = cls.build_english_summary(current_case)
+            return current_case, ai_reply, True, None
+
+        # 3. IMMEDIATE COMPLETION CHECK (If patient says 'nahi' / 'no' at ANY step after turn 1)
         if len(current_case.transcript) >= 2 and cls.is_negative_confirmation(patient_text):
             ai_reply = (
                 "धन्यवाद! आपकी सभी जानकारी दर्ज कर ली गई है और डॉक्टर की समीक्षा के लिए भेज दी गई है। समीक्षा के बाद आपका प्रिस्क्रिप्शन यहाँ दिखेगा।"
@@ -164,7 +187,7 @@ class TriageEngine:
             current_case.summary_en = cls.build_english_summary(current_case)
             return current_case, ai_reply, True, None
 
-        # 3. Dynamic Natural Conversation using LLM (Groq Llama-3.3-70b)
+        # 4. Dynamic Natural Conversation using LLM (Groq Llama-3.3-70b)
         previous_ai_texts = [m.text for m in current_case.transcript if m.sender == "ai"]
         history_list = [{"sender": m.sender, "text": m.text} for m in current_case.transcript]
         known_facts = {
