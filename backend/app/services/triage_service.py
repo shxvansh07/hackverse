@@ -325,7 +325,8 @@ class TriageService:
         # specifically (fallback_questions.QUESTION_ORDER always asks it
         # last), so the patient always gets asked "anything else, or should I
         # send this to your doctor?" before handoff, rather than the
-        # interview ending abruptly on an early "no allergies".
+        # interview ending abruptly on an early "no allergies". Covered by
+        # test_intake_completes_with_zero_llm_providers.
         #
         # Deliberately not also gated on `blocking` (unfilled required
         # fields): if a required field genuinely never got answered, the

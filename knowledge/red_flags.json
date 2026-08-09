@@ -1,9 +1,9 @@
 {
   "_meta": {
     "name": "Deterministic Red-Flag Triage Reference",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "authority": "This file is the SOLE source of URGENT classification. The LLM may suggest a red flag, but only a match against this file can set state URGENT. Application logic evaluates these patterns; the model never decides routing.",
-    "match_strategy": "case-insensitive substring match over normalized patient text plus extracted symptom terms"
+    "match_strategy": "case-insensitive substring match over normalized patient text plus extracted symptom terms, with a bounded-proximity fallback for multi-word patterns (see app.safety.engine._proximity_match)"
   },
   "red_flags": [
     {
@@ -15,6 +15,8 @@
         "chest pain", "chest tightness", "chest pressure", "pain in chest",
         "crushing chest", "tightness in chest", "heaviness in chest",
         "pain radiating to arm", "pain radiating to jaw", "pain radiating to left arm",
+        "pain radiating to back", "pain radiating to shoulder",
+        "elephant sitting on my chest", "squeezing chest pain", "chest hurts badly",
         "seene me dard", "seene mein dard", "chhati me dard", "seene me bhari",
         "छाती में दर्द", "सीने में दर्द", "छाती में जकड़न", "सीने में भारीपन"
       ]
@@ -25,8 +27,10 @@
       "clinical_concern": "Acute asthma, pneumonia, pulmonary oedema, anaphylaxis",
       "severity": "CRITICAL",
       "patterns": [
-        "shortness of breath", "difficulty breathing", "cannot breathe", "can not breathe",
+        "shortness of breath", "short of breath", "difficulty breathing", "cannot breathe", "can not breathe",
         "trouble breathing", "breathless", "gasping for air", "severe wheezing",
+        "can't catch my breath", "cannot catch my breath", "struggling to breathe",
+        "chest feels tight when breathing", "winded and dizzy",
         "saans lene me dikkat", "sans lene me dikkat", "saans phool rahi", "dam ghut raha",
         "सांस लेने में तकलीफ", "साँस लेने में दिक्कत", "सांस फूल रही", "दम घुट रहा"
       ]
@@ -39,7 +43,9 @@
       "patterns": [
         "face drooping", "arm weakness", "slurred speech", "sudden numbness",
         "sudden paralysis", "one side weakness", "cannot move one side",
-        "sudden confusion", "sudden vision loss",
+        "sudden confusion", "sudden vision loss", "can't lift my arm",
+        "words coming out wrong", "vision going black in one eye",
+        "worst headache of my life", "sudden severe headache worst of my life",
         "bolne me dikkat", "chehra tedha", "ek taraf kamzori", "lakwa",
         "लकवा", "चेहरा टेढ़ा", "बोलने में दिक्कत", "एक तरफ कमजोरी"
       ]
@@ -51,6 +57,7 @@
       "severity": "CRITICAL",
       "patterns": [
         "fainted", "unconscious", "passed out", "blacked out", "lost consciousness",
+        "collapsed suddenly", "went limp", "eyes rolled back",
         "behosh", "behoosh", "behosh ho gaya", "बेहोश", "बेहोशी"
       ]
     },
@@ -61,7 +68,8 @@
       "severity": "CRITICAL",
       "patterns": [
         "uncontrolled bleeding", "coughing blood", "vomiting blood", "blood in vomit",
-        "blood in stool", "black tarry stool", "heavy bleeding",
+        "blood in stool", "black tarry stool", "heavy bleeding", "bleeding won't stop",
+        "soaking through pad every hour", "blood soaked bandage",
         "blood in saliva", "blood in spit", "blood in sputum", "blood while spitting",
         "khoon ki ulti", "khoon beh raha", "khoon aa raha", "khoon thook mein", "thook mein khoon",
         "खून की उल्टी", "खून बह रहा", "खून आ रहा", "थूक में खून"
@@ -75,6 +83,7 @@
       "patterns": [
         "swelling of lips", "swelling of tongue", "throat closing", "throat tightness",
         "lips swollen", "tongue swollen", "hives all over", "sudden severe rash with breathing",
+        "face swelling suddenly", "difficulty swallowing suddenly", "wheezing and swelling",
         "gala band ho raha", "hoth soojh gaye", "jeebh soojh gayi",
         "गला बंद होना", "होंठ सूज", "जीभ सूज"
       ]
@@ -86,7 +95,8 @@
       "severity": "HIGH",
       "patterns": [
         "severe sudden abdominal pain", "excruciating stomach pain", "unbearable stomach pain",
-        "rigid abdomen", "cannot touch my stomach",
+        "rigid abdomen", "cannot touch my stomach", "abdomen hard as a board",
+        "pain so bad I can't stand up straight", "worst stomach pain of my life",
         "pet me severe dard", "pet me asahay dard", "pet me bahut tez dard",
         "पेट में अत्यधिक दर्द", "पेट में असहनीय दर्द"
       ]
@@ -98,6 +108,7 @@
       "severity": "CRITICAL",
       "patterns": [
         "infant fever", "baby fever high", "newborn fever", "fever above 104", "fever 104",
+        "baby not feeding", "baby limp with fever", "baby lethargic with fever",
         "bachhe ko tez bukhar", "bache ko tez bukhar", "navjaat ko bukhar",
         "बच्चे को तेज़ बुखार", "नवजात को बुखार"
       ]
@@ -109,19 +120,137 @@
       "severity": "CRITICAL",
       "patterns": [
         "want to kill myself", "want to end my life", "suicidal", "harm myself",
-        "no reason to live", "khudkushi", "apni jaan lena",
+        "no reason to live", "better off dead", "planning to end it",
+        "khudkushi", "apni jaan lena",
         "आत्महत्या", "खुदकुशी", "जान देना"
       ]
     },
     {
       "code": "PREGNANCY_EMERGENCY",
       "label": "Pregnancy-Related Emergency",
-      "clinical_concern": "Antepartum haemorrhage, pre-eclampsia, miscarriage",
+      "clinical_concern": "Antepartum haemorrhage, pre-eclampsia, miscarriage, ectopic pregnancy",
       "severity": "CRITICAL",
       "patterns": [
         "pregnant and bleeding", "bleeding during pregnancy", "pregnant severe pain",
         "no fetal movement", "baby not moving",
+        "one sided pelvic pain and pregnant", "shoulder tip pain and missed period",
+        "positive pregnancy test with severe pain",
         "pregnancy me khoon", "गर्भावस्था में खून"
+      ]
+    },
+    {
+      "code": "SEPSIS_WARNING",
+      "label": "Possible Sepsis",
+      "clinical_concern": "Systemic infection with organ-dysfunction risk; a leading cause of preventable death that presents as 'just a bad fever'",
+      "severity": "CRITICAL",
+      "patterns": [
+        "fever with confusion", "fever and feel confused", "fever and can't think straight",
+        "fever and breathing very fast", "fever and feel like fainting",
+        "skin looks mottled", "fever with very fast heartbeat",
+        "bukhar aur confusion", "bukhar ke sath behoshi jaisa",
+        "बुखार के साथ भ्रम", "बुखार के साथ बेहोशी जैसा"
+      ]
+    },
+    {
+      "code": "DKA_WARNING",
+      "label": "Possible Diabetic Ketoacidosis",
+      "clinical_concern": "Life-threatening metabolic complication in a diabetic patient, often mistaken for routine vomiting",
+      "severity": "CRITICAL",
+      "patterns": [
+        "fruity breath", "breathing very fast and diabetic", "diabetic and vomiting",
+        "extreme thirst and vomiting", "diabetic and confused", "diabetic and breathing fast",
+        "sugar bahut zyada aur ulti", "diabetic hoon aur ulti ho rahi",
+        "डायबिटीज़ है और उल्टी हो रही"
+      ]
+    },
+    {
+      "code": "TESTICULAR_TORSION",
+      "label": "Suspected Testicular Torsion",
+      "clinical_concern": "Time-critical surgical emergency; organ-salvage window is only a few hours",
+      "severity": "CRITICAL",
+      "patterns": [
+        "sudden testicle pain", "severe scrotal pain", "testicle swollen and painful suddenly",
+        "testicle pain and swelling", "sudden groin pain and swelling one side",
+        "andkosh me achanak dard", "अंडकोष में अचानक दर्द"
+      ]
+    },
+    {
+      "code": "CAUDA_EQUINA",
+      "label": "Suspected Cauda Equina Syndrome",
+      "clinical_concern": "Spinal nerve compression; delayed treatment risks permanent paralysis and incontinence",
+      "severity": "CRITICAL",
+      "patterns": [
+        "loss of bladder control with back pain", "loss of bowel control with back pain",
+        "numbness in groin", "saddle numbness", "can't feel when I urinate",
+        "back pain with numbness between legs",
+        "peeth dard ke sath peshab par control nahi", "पीठ दर्द के साथ पेशाब पर नियंत्रण नहीं"
+      ]
+    },
+    {
+      "code": "SEVERE_ASTHMA_ATTACK",
+      "label": "Severe Acute Asthma Attack",
+      "clinical_concern": "Life-threatening bronchospasm requiring emergency treatment, distinct from routine breathlessness",
+      "severity": "CRITICAL",
+      "patterns": [
+        "can't speak full sentences", "cannot speak full sentences", "lips turning blue",
+        "using neck muscles to breathe", "inhaler not helping", "severe asthma attack",
+        "hoth neele pad gaye", "होंठ नीले पड़ गए"
+      ]
+    },
+    {
+      "code": "MENINGITIS_EXTENDED",
+      "label": "Possible Meningitis (extended signs)",
+      "clinical_concern": "Bacterial or viral meningitis; photophobia and severe headache with fever/vomiting beyond simple neck stiffness",
+      "severity": "CRITICAL",
+      "patterns": [
+        "light hurts my eyes and fever", "can't look at light", "light sensitivity with fever",
+        "severe headache with fever and vomiting", "stiff neck with fever",
+        "roshni se takleef aur bukhar", "sar me dard bukhar aur ulti",
+        "रोशनी से तकलीफ़ और बुखार"
+      ]
+    },
+    {
+      "code": "POISONING_OVERDOSE",
+      "label": "Suspected Poisoning or Overdose",
+      "clinical_concern": "Accidental or intentional ingestion of a toxic substance or excess medication",
+      "severity": "CRITICAL",
+      "patterns": [
+        "took too many pills", "swallowed poison", "accidental ingestion", "drug overdose",
+        "drank chemical", "child swallowed medicine", "swallowed something poisonous",
+        "zeher pi liya", "jyada dawai kha li", "ज़हर पी लिया", "ज्यादा दवाई खा ली"
+      ]
+    },
+    {
+      "code": "ACTIVE_SEIZURE",
+      "label": "Active Seizure",
+      "clinical_concern": "Ongoing convulsion or post-ictal unresponsiveness, distinct from a past history of seizures",
+      "severity": "CRITICAL",
+      "patterns": [
+        "having a seizure", "convulsions right now", "is fitting", "jerking movements and unresponsive",
+        "seizure right now", "shaking uncontrollably and unresponsive",
+        "daura pad raha", "abhi daura aa raha hai", "दौरा पड़ रहा", "अभी दौरा आ रहा है"
+      ]
+    },
+    {
+      "code": "SEVERE_BURN",
+      "label": "Severe or Extensive Burn",
+      "clinical_concern": "Large-area, chemical, or electrical burns needing emergency care, not home dressing",
+      "severity": "HIGH",
+      "patterns": [
+        "large burn", "burn covering large area", "chemical burn", "electrical burn",
+        "burnt with hot oil large area", "severe burn injury",
+        "bahut bada jal gaya", "बहुत बड़ा जल गया"
+      ]
+    },
+    {
+      "code": "EYE_EMERGENCY",
+      "label": "Ophthalmic Emergency",
+      "clinical_concern": "Chemical eye injury or sudden vision loss requiring same-day ophthalmology, not routine eye-drop management",
+      "severity": "HIGH",
+      "patterns": [
+        "chemical in eye", "something splashed in my eye", "sudden loss of vision",
+        "curtain came down over my vision", "sudden blurred vision one eye",
+        "aankh me chemical gir gaya", "आँख में केमिकल गिर गया"
       ]
     }
   ],
@@ -147,6 +276,50 @@
       "all_of": ["fever"],
       "duration_exceeds_days": 7,
       "rationale": "Fever persisting beyond one week needs clinician assessment rather than symptomatic treatment."
+    },
+    {
+      "code": "FEVER_ABDOMINAL_PAIN",
+      "label": "Fever with abdominal pain",
+      "clinical_concern": "Appendicitis, enteric fever with perforation risk, cholangitis",
+      "all_of": ["fever", "abdominal pain"],
+      "rationale": "Fever combined with abdominal pain needs clinician evaluation to rule out a surgical or septic abdomen."
+    },
+    {
+      "code": "FEVER_JOINT_PAIN",
+      "label": "Fever with joint pain",
+      "clinical_concern": "Dengue, chikungunya",
+      "all_of": ["fever", "joint pain"],
+      "rationale": "Fever with joint pain is a classic early dengue/chikungunya presentation and warrants clinician review rather than symptomatic self-treatment, even before bleeding signs appear."
+    },
+    {
+      "code": "COUGH_WEIGHT_LOSS",
+      "label": "Persistent cough with weight loss",
+      "clinical_concern": "Tuberculosis, malignancy",
+      "all_of": ["cough", "weight loss"],
+      "duration_exceeds_days": 14,
+      "rationale": "A cough persisting beyond two weeks with unintentional weight loss needs clinician evaluation to rule out tuberculosis or malignancy."
+    },
+    {
+      "code": "PROLONGED_VOMITING_DIARRHOEA",
+      "label": "Vomiting and diarrhoea beyond the self-limiting window",
+      "clinical_concern": "Significant dehydration risk",
+      "all_of": ["vomiting", "diarrhea"],
+      "duration_exceeds_days": 3,
+      "rationale": "Combined vomiting and diarrhoea lasting beyond three days carries a real dehydration risk and should not continue to be managed as routine mild gastroenteritis without clinician review."
+    },
+    {
+      "code": "HEADACHE_FEVER_VOMITING",
+      "label": "Headache with fever and vomiting",
+      "clinical_concern": "Meningitis, raised intracranial pressure",
+      "all_of": ["headache", "fever", "vomiting"],
+      "rationale": "The combination of headache, fever and vomiting is a classic soft sign of meningitis or raised intracranial pressure and warrants clinician evaluation even without neck stiffness or photophobia being explicitly reported."
+    },
+    {
+      "code": "DIABETIC_NONHEALING_WOUND",
+      "label": "Known diabetic with a non-healing wound",
+      "clinical_concern": "Diabetic foot ulcer, risk of limb-threatening infection",
+      "all_of": ["diabetic", "wound"],
+      "rationale": "A non-healing wound in a known diabetic patient is not self-treatable and requires clinician assessment to prevent progression to a limb-threatening infection."
     }
   ]
 }
