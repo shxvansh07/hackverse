@@ -371,7 +371,11 @@ async function request<T>(path: string, init: RequestInit = {}, auth = false): P
   }
 
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError('Received invalid response from clinical service.', response.status, 'INVALID_RESPONSE');
+  }
 }
 
 export const api = {

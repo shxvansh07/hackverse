@@ -106,80 +106,66 @@ export class SpeechInput {
  *  session — the list loads asynchronously and `getVoices()` doesn't wait for
  *  it. Calling speak() before that load finishes silently picks no voice at
  *  all, which is why a page's very first utterance can be inaudible even
- *  though every later one works fine.
- *
- *  This only tracks READINESS (a boolean), not the voice list itself — the
- *  actual `SpeechSynthesisVoice[]` is re-fetched fresh on every speak() call
- *  below. Caching and reusing the same voice *objects* across calls is a
- *  separate, nastier bug: on some Chromium builds a previously-used
- *  `SpeechSynthesisVoice` reference silently stops producing audio on reuse
- *  — especially for non-default/network voices — while the platform default
- *  voice keeps working regardless because it never needs an explicit
- *  `utterance.voice` assignment. That is exactly why a Hindi doctor-side
- *  voice could speak once and then go silent while English kept working: the
- *  stale object was the problem, not the language. */
-let voicesLoaded = false;
-let voicesLoadedPromise: Promise<void> | null = null;
+ *  though every later one works fine. Resolved once, cached, reused. */
+let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null;
 
-function ensureVoicesLoaded(): Promise<void> {
-  if (!isSynthesisSupported()) return Promise.resolve();
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  if (!isSynthesisSupported()) return Promise.resolve([]);
 
-  if (voicesLoaded || window.speechSynthesis.getVoices().length > 0) {
-    voicesLoaded = true;
-    return Promise.resolve();
-  }
+  const existing = window.speechSynthesis.getVoices();
+  if (existing.length > 0) return Promise.resolve(existing);
 
-  if (!voicesLoadedPromise) {
-    voicesLoadedPromise = new Promise((resolve) => {
+  if (!voicesReady) {
+    voicesReady = new Promise((resolve) => {
       const onChange = () => {
-        if (window.speechSynthesis.getVoices().length > 0) {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
           window.speechSynthesis.removeEventListener('voiceschanged', onChange);
-          voicesLoaded = true;
-          resolve();
+          resolve(voices);
         }
       };
       window.speechSynthesis.addEventListener('voiceschanged', onChange);
       // Some browsers never fire voiceschanged reliably; don't wait forever.
-      setTimeout(() => {
-        voicesLoaded = true;
-        resolve();
-      }, 1000);
+      setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
     });
   }
-  return voicesLoadedPromise;
+  return voicesReady;
 }
 
 /** Speak text aloud. Resolves to whether a voice matching `languageTag` was
  *  actually found — callers that need to know playback might have been
  *  inaudible (e.g. no voice installed for that language) can check this
  *  instead of assuming silence means success. */
-export async function speak(text: string, languageTag: string): Promise<boolean> {
-  if (!isSynthesisSupported() || !text.trim()) return false;
+export function speak(text: string, languageTag: string): Promise<boolean> {
+  return new Promise(async (resolve) => {
+    if (!isSynthesisSupported() || !text.trim()) {
+      resolve(false);
+      return;
+    }
 
-  window.speechSynthesis.cancel();
+    window.speechSynthesis.cancel();
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = languageTag;
-  utterance.rate = 0.95; // slightly slow: this is clinical instruction, not chat
-  utterance.pitch = 1;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = languageTag;
+    utterance.rate = 0.95; // slightly slow: this is clinical instruction, not chat
+    utterance.pitch = 1;
 
-  await ensureVoicesLoaded();
-  // Fetched fresh, not cached — see the note above.
-  const voices = window.speechSynthesis.getVoices();
-  const base = languageTag.split('-')[0];
-  const match =
-    voices.find((v) => v.lang === languageTag) ||
-    voices.find((v) => v.lang.startsWith(base));
-  if (match) utterance.voice = match;
-  else if (voices.length > 0) {
-    // Voices did load — there just isn't one for this language. Speaking
-    // anyway would use whatever default voice Chrome falls back to, which
-    // usually can't render non-Latin script and produces no audible output.
-    console.warn(`No speech voice available for "${languageTag}". Playback may be silent.`);
-  }
+    const voices = await loadVoices();
+    const base = languageTag.split('-')[0];
+    const match =
+      voices.find((v) => v.lang === languageTag) ||
+      voices.find((v) => v.lang.startsWith(base));
+    
+    if (match) utterance.voice = match;
+    else if (voices.length > 0) {
+      console.warn(`No speech voice available for "${languageTag}". Playback may be silent.`);
+    }
 
-  window.speechSynthesis.speak(utterance);
-  return Boolean(match);
+    utterance.onend = () => resolve(Boolean(match));
+    utterance.onerror = () => resolve(false);
+
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 export function stopSpeaking(): void {

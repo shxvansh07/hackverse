@@ -219,21 +219,40 @@ export function Spinner({ label }: { label?: string }) {
   );
 }
 
-export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorNotice({
+  message,
+  onRetry,
+  onClose,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onClose?: () => void;
+}) {
   return (
     <div
       role="alert"
       className="flex items-start justify-between gap-4 border border-risk-urgent/30 bg-risk-urgent-soft px-4 py-3"
     >
       <p className="text-[13px] leading-relaxed text-risk-urgent">{message}</p>
-      {onRetry && (
-        <button
-          onClick={onRetry}
-          className="shrink-0 text-[13px] font-medium text-risk-urgent underline underline-offset-2"
-        >
-          Retry
-        </button>
-      )}
+      <div className="flex items-center gap-3 shrink-0">
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="text-[13px] font-medium text-risk-urgent underline underline-offset-2"
+          >
+            Retry
+          </button>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="text-[13px] font-medium text-risk-urgent hover:text-ink transition-colors"
+            title="Dismiss error"
+          >
+            ✕
+          </button>
+        )}
+      </div>
     </div>
   );
 }

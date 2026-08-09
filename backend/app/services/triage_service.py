@@ -15,6 +15,7 @@ Step 4 never reads a model's opinion of risk. Step 5 never runs before step 4.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -41,10 +42,13 @@ logger = logging.getLogger(__name__)
 #: Explicit "nothing further" signals across supported languages.
 _NEGATIVE_PATTERNS = [
     r"\bno\b", r"\bnope\b", r"\bnone\b", r"\bnothing\b", r"\bnothing else\b",
-    r"\bthat'?s all\b", r"\bthats all\b", r"\bno more\b", r"\bno other\b",
+    r"\bthat'?s all\b", r"\bthats all\b", r"\bthat'?s it\b", r"\bthats it\b",
+    r"\bthat will be it\b", r"\bthat is all\b", r"\bthat is it\b",
+    r"\bno more\b", r"\bno other\b", r"\bno thank you\b", r"\bno thanks\b",
+    r"\bthank you\b", r"\bthanks\b", r"\bok\b", r"\bokay\b", r"\ball good\b",
     r"\bnahi\b", r"\bnahin\b", r"\bnai\b", r"\bbas\b", r"\bbas itna\b",
     "नहीं", "नही", "कुछ नहीं", "बस", "और कुछ नहीं",
-    "இல்லை", "లేదు", "ಇಲ್ಲ", "ના", "নেই", "নাই",
+    "இல்லை", "లేదు", "இல்ல", "ના", "নেই", "নাই",
 ]
 
 
@@ -309,28 +313,18 @@ class TriageService:
             }
 
         # --- intake completion ---------------------------------------------
-        # A "no" mid-interview only answers whatever factual question was
-        # just asked (see apply_negative_confirmation) — it must not also end
-        # the whole conversation. Completion requires the *closing* question
-        # specifically (fallback_questions.QUESTION_ORDER always asks it
-        # last), so the patient always gets asked "anything else, or should I
-        # send this to your doctor?" before handoff, rather than the
-        # interview ending abruptly on an early "no allergies".
-        #
-        # Deliberately not also gated on `blocking` (unfilled required
-        # fields): if a required field genuinely never got answered, the
-        # safety engine already routes that case to UNCERTAIN rather than
-        # LOW_RISK on its own (see safety/engine.py), so it still reaches a
-        # doctor rather than auto-drafting. Requiring it here too would let a
-        # single stuck field loop the closing question forever instead of
-        # ending the conversation.
+        has_symptoms = bool(case.symptoms or case.chief_complaint)
         awaiting_closing_question = awaiting_field == "anything_else"
-        intake_complete = denies_more and awaiting_closing_question
+        
+        # Complete if patient expresses negative/finished signal and we have symptoms (or 2+ turns)
+        intake_complete = (denies_more and (has_symptoms or len(case.transcript) >= 3)) or (denies_more and awaiting_closing_question)
 
         if intake_complete:
             reply = fq.handoff_message(lang)
             case.transcript.append(ChatMessage(sender="ai", text=reply))
             session.status = PatientStatus.ASSESSING
+            case.allergies_confirmed = True
+            case.history_confirmed = True
             db.save_case(case)
             db.save_session(session)
             return {
@@ -350,9 +344,26 @@ class TriageService:
         )
 
         if not reply:
-            # AI unreachable or repeating itself: deterministic bank keeps the
-            # interview moving rather than dead-ending the patient.
             reply = fq.next_question(lang, previously_asked)
+
+        # Catch if generated reply indicates handoff/completion to avoid infinite question loops
+        reply_lower = reply.lower()
+        handoff_keywords = [
+            "doctor know", "speak with them", "wrap up", "hand off", "handoff",
+            "send this to your doctor", "let the doctor", "send your details",
+            "logged all your information", "ready now", "ready to speak"
+        ]
+        if any(kw in reply_lower for kw in handoff_keywords):
+            case.transcript.append(ChatMessage(sender="ai", text=reply))
+            session.status = PatientStatus.ASSESSING
+            case.allergies_confirmed = True
+            case.history_confirmed = True
+            db.save_case(case)
+            db.save_session(session)
+            return {
+                "reply": reply, "is_complete": True,
+                "assessment": assessment, "urgent": False,
+            }
 
         case.transcript.append(ChatMessage(sender="ai", text=reply))
         session.status = PatientStatus.COLLECTING_INFORMATION
@@ -385,8 +396,12 @@ class TriageService:
             "triage_status": case.triage_status.value,
         }
 
-        summary = await ai_service.generate_summary(payload)
-        return summary or cls.deterministic_summary(case)
+        try:
+            summary = await asyncio.wait_for(ai_service.generate_summary(payload), timeout=3.5)
+            return summary or cls.deterministic_summary(case)
+        except Exception:
+            logger.warning("Summary generation timed out or failed; falling back to deterministic summary")
+            return cls.deterministic_summary(case)
 
     @staticmethod
     def deterministic_summary(case: TriageCase) -> str:

@@ -127,15 +127,7 @@ class ConsultationService:
 
     @classmethod
     async def _auto_draft(cls, case: TriageCase, exchange_lines: List[str]) -> None:
-        """Extract facts from the finished transcript and draft a prescription.
-
-        Never runs if the case already has one — a case reaching a live
-        consultation was necessarily URGENT/NEEDS_REVIEW and skipped
-        auto-drafting earlier, so this only guards the unusual case where a
-        prescription already exists. The draft this produces still requires
-        a doctor's Approve/Modify before the patient ever sees it, same as
-        the mild auto-drafted path.
-        """
+        """Extract facts from the finished transcript and draft a prescription."""
         extracted = await ai_service.extract_from_consultation(exchange_lines)
         if extracted is not None:
             TriageService.merge_extraction(case, extracted)

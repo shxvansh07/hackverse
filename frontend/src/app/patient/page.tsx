@@ -63,13 +63,27 @@ export default function PatientPage() {
   const [urgentGuidance, setUrgentGuidance] = useState<string | null>(null);
 
   const [draft, setDraft] = useState('');
+  const draftRef = useRef('');
+  const setDraftWithRef = useCallback((val: string | ((prev: string) => string)) => {
+    setDraft((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      draftRef.current = next;
+      return next;
+    });
+  }, []);
+  const submitMessageRef = useRef<(text: string) => void>();
+  const startListeningRef = useRef<() => void>();
   const [interim, setInterim] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
   const [listening, setListening] = useState(false);
-  const [voiceReplies, setVoiceReplies] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceReplies, setVoiceReplies] = useState(true);
+  const [uiMode, setUiMode] = useState<'text' | 'hands-free'>('text');
+  const uiModeRef = useRef(uiMode);
+  uiModeRef.current = uiMode;
 
   const [statusMessage, setStatusMessage] = useState('');
   const [prescription, setPrescription] = useState<PresentedPrescription | null>(null);
@@ -116,7 +130,7 @@ export default function PatientPage() {
   /* --------------------------------------------------------- waiting poll */
 
   useEffect(() => {
-    if ((phase !== 'waiting' && phase !== 'visit-report') || !sessionId) return;
+    if (phase !== 'waiting' || !sessionId) return;
 
     let cancelled = false;
 
@@ -132,13 +146,13 @@ export default function PatientPage() {
         setRecommendedSpecialty(status.recommended_specialty);
         if (status.appointment) setAppointment(status.appointment);
 
-        // A completed in-person consultation shows a visit report right
-        // away, but polling continues afterward — the doctor may still be
-        // reviewing an auto-drafted prescription from that same
-        // consultation, which becomes available later on this same case.
+        // A completed in-person consultation is the most recent, most
+        // complete outcome available — it takes priority over the async
+        // prescription track, which a case may or may not also have.
         if (status.visit_report_available && status.visit_report) {
           setVisitReport(status.visit_report);
           setPhase('visit-report');
+          return;
         }
 
         if (status.rejected) {
@@ -171,15 +185,16 @@ export default function PatientPage() {
 
   /* ----------------------------------------------------------- actions */
 
-  const beginSession = useCallback(async (selected: Language) => {
+  const beginSession = useCallback(async (selectedLang: Language) => {
+    setLanguage(selectedLang);
     setError(null);
+    setPhase('conversation');
+
     try {
-      const session = await api.startSession(selected.code);
-      setLanguage(selected);
+      const session = await api.startSession(selectedLang.code);
       setSessionId(session.session_id);
       setPatientStatus(session.status);
-      setPrescriptionLang(selected.code);
-      setPhase('conversation');
+      setPrescriptionLang(selectedLang.code);
 
       // The backend seeds the opening greeting into the transcript when the
       // session is created; read it rather than sending a dummy message.
@@ -198,7 +213,7 @@ export default function PatientPage() {
       if (!sessionId || !text.trim() || sending) return;
 
       const value = text.trim();
-      setDraft('');
+      setDraftWithRef('');
       setInterim('');
       setError(null);
       setLastFailedMessage(null);
@@ -224,35 +239,65 @@ export default function PatientPage() {
           setUrgentGuidance(response.urgent_guidance);
         }
 
-        if (voiceReplies && language) {
-          speak(response.ai_response, language.speech_tag);
-        }
+        // Stop thinking spinner so text displays immediately
+        setSending(false);
 
         if (response.is_complete) {
+          stopSpeaking();
           if (response.triage_status === 'URGENT') {
-            // Escalated cases are already handed off server-side.
             setPhase('waiting');
           } else {
             await api.assess(sessionId);
             await api.handOff(sessionId);
             setPhase('waiting');
           }
+          return;
+        }
+
+        // Only speak aloud and auto-listen if in hands-free mode!
+        if (uiModeRef.current === 'hands-free' && language) {
+          setSpeaking(true);
+          await speak(response.ai_response, language.speech_tag).catch(() => {});
+          setSpeaking(false);
+          if (startListeningRef.current) {
+             startListeningRef.current();
+          }
         }
       } catch (err) {
-        // Session state is preserved server-side, so retry is safe.
         setLastFailedMessage(value);
         setMessages((prev) => prev.slice(0, -1));
         setError(
-          err instanceof ApiError
+          err instanceof Error
             ? err.message
             : 'Something went wrong. Your information is saved — please try again.',
         );
-      } finally {
         setSending(false);
       }
     },
-    [sessionId, sending, voiceReplies, language],
+    [sessionId, sending, language, setDraftWithRef],
   );
+  
+  submitMessageRef.current = submitMessage;
+
+  const handleEndCall = useCallback(async () => {
+    if (!sessionId) return;
+    stopSpeaking();
+    speechRef.current?.stop();
+    setListening(false);
+    setSpeaking(false);
+    setSending(true);
+    try {
+      if (risk !== 'URGENT') {
+        await api.assess(sessionId).catch(() => {});
+        await api.handOff(sessionId).catch(() => {});
+      }
+      setPhase('waiting');
+    } catch (err) {
+      setError('Failed to send case to doctor. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  }, [sessionId, risk]);
 
   const confirmAppointment = useCallback(async () => {
     if (!clinicalState || bookingAppointment) return;
@@ -273,20 +318,14 @@ export default function PatientPage() {
     }
   }, [clinicalState, recommendedSpecialty, bookingAppointment]);
 
-  const toggleListening = useCallback(() => {
-    if (!language || !speechRef.current) return;
-
-    if (listening) {
-      speechRef.current.stop();
-      setListening(false);
-      return;
-    }
-
+  const startListening = useCallback(() => {
+    if (!language || !speechRef.current || speechRef.current.listening) return;
     stopSpeaking();
+
     const started = speechRef.current.start(language.speech_tag, {
       onResult: (transcript, isFinal) => {
         if (isFinal) {
-          setDraft((prev) => (prev ? `${prev} ${transcript}` : transcript));
+          setDraftWithRef((prev) => (prev ? `${prev} ${transcript}` : transcript));
           setInterim('');
         } else {
           setInterim(transcript);
@@ -300,10 +339,27 @@ export default function PatientPage() {
       onEnd: () => {
         setListening(false);
         setInterim('');
+        if (draftRef.current.trim() && submitMessageRef.current) {
+          submitMessageRef.current(draftRef.current);
+        }
       },
     });
     if (started) setListening(true);
-  }, [language, listening]);
+  }, [language, setDraftWithRef]);
+
+  startListeningRef.current = startListening;
+
+  const toggleListening = useCallback(() => {
+    if (speaking) {
+      stopSpeaking();
+      setSpeaking(false);
+    }
+    if (listening) {
+      speechRef.current?.stop();
+    } else {
+      startListening();
+    }
+  }, [listening, speaking, startListening]);
 
   const changePrescriptionLanguage = useCallback(
     async (code: string) => {
@@ -351,25 +407,47 @@ export default function PatientPage() {
         <div className="mx-auto max-w-2xl px-5 pb-3">
           <StatusRail current={patientStatus} />
         </div>
-
-        {/* Transcript dissolves into the header instead of being sheared off
-            by its edge as it scrolls underneath. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-full h-10 bg-gradient-to-b from-paper to-transparent"
-        />
       </header>
 
       <main className="mx-auto max-w-2xl px-5 pb-32 pt-6 print:max-w-none print:p-0">
         {phase === 'conversation' && (
-          <Conversation
+          <VoiceInterface
+            uiMode={uiMode}
+            onModeChange={(mode: 'text' | 'hands-free') => {
+              setUiMode(mode);
+              if (mode === 'hands-free') {
+                if (speechSupported && !listening) {
+                  toggleListening();
+                }
+              } else {
+                if (listening) {
+                  toggleListening();
+                }
+              }
+            }}
             messages={messages}
             sending={sending}
+            speaking={speaking}
             error={error}
             lastFailedMessage={lastFailedMessage}
             language={language}
             onRetry={() => lastFailedMessage && submitMessage(lastFailedMessage)}
-            transcriptEndRef={transcriptEndRef}
+            draft={draft}
+            interim={interim}
+            listening={listening}
+            speechSupported={speechSupported}
+            synthesisSupported={synthesisSupported}
+            voiceReplies={voiceReplies}
+            onToggleVoiceReplies={() => {
+              stopSpeaking();
+              setSpeaking(false);
+              setVoiceReplies((v) => !v);
+            }}
+            onToggleListening={toggleListening}
+            onSubmit={(text?: string) => submitMessage(text !== undefined ? text : draft)}
+            onDraftChange={setDraft}
+            onEndCall={handleEndCall}
+            onClearError={() => setError(null)}
           />
         )}
 
@@ -404,25 +482,6 @@ export default function PatientPage() {
           <VisitReportView report={visitReport} language={language} />
         )}
       </main>
-
-      {phase === 'conversation' && (
-        <Composer
-          draft={draft}
-          interim={interim}
-          sending={sending}
-          listening={listening}
-          speechSupported={speechSupported}
-          synthesisSupported={synthesisSupported}
-          voiceReplies={voiceReplies}
-          onDraftChange={setDraft}
-          onToggleVoiceReplies={() => {
-            stopSpeaking();
-            setVoiceReplies((v) => !v);
-          }}
-          onToggleListening={toggleListening}
-          onSubmit={() => submitMessage(draft)}
-        />
-      )}
     </div>
   );
 }
@@ -499,231 +558,322 @@ function LanguageChooser({
 
 /* ====================================================================== */
 
-function Conversation({
+function VoiceInterface({ uiMode, onModeChange, ...props }: any) {
+  if (uiMode === 'hands-free') {
+    return <HandsFreeModeView {...props} onExit={() => onModeChange('text')} />;
+  }
+  
+  return <TextModeView {...props} onEnterHandsFree={() => onModeChange('hands-free')} />;
+}
+
+function TextModeView({
   messages,
   sending,
   error,
   lastFailedMessage,
   language,
   onRetry,
-  transcriptEndRef,
-}: {
-  messages: ChatMessage[];
-  sending: boolean;
-  error: string | null;
-  lastFailedMessage: string | null;
-  language: Language | null;
-  onRetry: () => void;
-  transcriptEndRef: React.RefObject<HTMLDivElement>;
-}) {
-  const visible = messages.filter((m) => m.text.trim() && m.text !== '​');
-
-  // An intake interview only ever asks for one answer at a time, so the
-  // newest question gets the page and everything before it recedes into a
-  // quiet transcript. Splitting on the last assistant turn (rather than
-  // simply taking the last message) keeps the patient's just-sent reply
-  // sitting under the question it answers while the next one is fetched.
-  let askedAt = -1;
-  for (let i = visible.length - 1; i >= 0; i -= 1) {
-    if (visible[i].sender === 'ai') {
-      askedAt = i;
-      break;
-    }
-  }
-  const question = askedAt >= 0 ? visible[askedAt] : null;
-  const history = askedAt >= 0 ? visible.slice(0, askedAt) : visible;
-  const answered = askedAt >= 0 ? visible.slice(askedAt + 1) : [];
-
-  return (
-    <div className="space-y-10">
-      {history.length > 0 && (
-        <ol className="space-y-4">
-          {history.map((message, index) => (
-            <PastTurn key={`${message.timestamp}-${index}`} message={message} language={language} />
-          ))}
-        </ol>
-      )}
-
-      {question && (
-        <div
-          // Keyed on the question itself so a new one remounts and replays the
-          // CSS enter animation; without the key React would diff the text in
-          // place and the change would pass unnoticed.
-          key={question.timestamp}
-          className="animate-rise"
-        >
-          <p className="label-meta" aria-hidden>
-            Assistant
-          </p>
-          <p
-            lang={language?.code}
-            aria-live="polite"
-            className="question mt-3 whitespace-pre-wrap"
-          >
-            {question.text}
-          </p>
-        </div>
-      )}
-
-      {answered.length > 0 && (
-        <ol className="space-y-4">
-          {answered.map((message, index) => (
-            <PastTurn key={`${message.timestamp}-${index}`} message={message} language={language} />
-          ))}
-        </ol>
-      )}
-
-      {sending && (
-        <div className="flex justify-start">
-          <Spinner label="Thinking" />
-        </div>
-      )}
-
-      <div ref={transcriptEndRef} />
-
-      {error && (
-        <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} />
-      )}
-    </div>
-  );
-}
-
-/**
- * One settled turn in the transcript above the live question.
- *
- * The reveal is a CSS scroll timeline (`.turn-reveal`) rather than anything
- * driven from here: the transcript scrolls itself to the newest turn, so an
- * IntersectionObserver entrance almost never fires — measured, it fired on
- * none of ten turns — and a motion library costs 35kB on the screen a patient
- * loads first. Where view timelines are unsupported the turn simply renders,
- * which is the only acceptable failure mode for clinical text.
- */
-function PastTurn({
-  message,
-  language,
-}: {
-  message: ChatMessage;
-  language: Language | null;
-}) {
-  const fromPatient = message.sender === 'patient';
-
-  return (
-    <li className={cx('turn-reveal flex', fromPatient ? 'justify-end' : 'justify-start')}>
-      <div className={cx('max-w-[85%]', fromPatient && 'text-right')}>
-        <span className="sr-only">{fromPatient ? 'You said' : 'Assistant asked'}</span>
-        <p
-          lang={fromPatient ? undefined : language?.code}
-          className={cx(
-            'whitespace-pre-wrap text-[15px] leading-relaxed',
-            fromPatient ? 'text-ink' : 'border-l-2 border-rule pl-3 text-ink-muted',
-          )}
-        >
-          {message.text}
-        </p>
-      </div>
-    </li>
-  );
-}
-
-/* ====================================================================== */
-
-function Composer({
   draft,
   interim,
-  sending,
   listening,
   speechSupported,
   synthesisSupported,
   voiceReplies,
-  onDraftChange,
   onToggleVoiceReplies,
   onToggleListening,
   onSubmit,
-}: {
-  draft: string;
-  interim: string;
-  sending: boolean;
-  listening: boolean;
-  speechSupported: boolean;
-  synthesisSupported: boolean;
-  voiceReplies: boolean;
-  onDraftChange: (value: string) => void;
-  onToggleVoiceReplies: () => void;
-  onToggleListening: () => void;
-  onSubmit: () => void;
-}) {
+  onDraftChange,
+  onEnterHandsFree,
+  onClearError,
+}: any) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, draft, interim, sending]);
+
   return (
-    <div className="fixed inset-x-0 bottom-0 border-t border-rule bg-paper/95 backdrop-blur">
-      <div className="mx-auto max-w-2xl px-5 py-4">
-        {listening && (
-          <p className="mb-2 flex items-center gap-2 text-[12px] text-accent">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot" aria-hidden />
-            Listening{interim && <span className="text-ink-faint">— {interim}</span>}
-          </p>
+    <div className="flex flex-col min-h-[75vh] relative pb-24">
+      {/* Standard Chat Scrollable Container */}
+      <div className="flex flex-col gap-4 px-6 sm:px-12 pt-10 pb-16 w-full max-w-4xl mx-auto h-[60vh] overflow-y-auto no-scrollbar">
+        {messages.length === 0 && !draft && !interim && !sending && (
+          <div className="flex justify-center mt-10">
+            <div className="bg-surface border border-rule rounded-2xl px-6 py-4 shadow-sm text-center">
+              <h2 className="text-xl font-bold text-ink mb-1">Ready to begin.</h2>
+              <p className="text-ink-muted">How can I help you today?</p>
+            </div>
+          </div>
         )}
 
-        <div className="flex items-end gap-2">
-          <textarea
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                onSubmit();
-              }
-            }}
-            rows={1}
-            placeholder="Describe how you feel…"
-            disabled={sending}
-            className="field max-h-32 min-h-[46px] flex-1 resize-none"
-          />
+        {messages.map((m: any, idx: number) => {
+           const isAi = m.sender === 'ai';
+           return (
+             <div key={idx} className={cx("flex flex-col animate-rise", isAi ? "items-start" : "items-end")}>
+               <div className={cx(
+                 "max-w-[85%] sm:max-w-[75%] rounded-2xl px-5 py-3 shadow-sm",
+                 isAi ? "bg-white border border-rule text-ink rounded-tl-none" : "bg-accent text-white rounded-tr-none"
+               )}>
+                 <div className="flex items-center gap-2 mb-1">
+                   <p className={cx("text-[11px] font-semibold uppercase tracking-wider", isAi ? "text-ink-faint" : "text-white/80")}>
+                     {isAi ? 'Assistant' : 'You'}
+                   </p>
+                   {isAi && (
+                     <button
+                       type="button"
+                       onClick={() => speak(m.text, language?.speech_tag)}
+                       className={cx("p-1 transition-colors rounded-full ml-auto", isAi ? "text-ink-faint hover:text-accent" : "text-white/70 hover:text-white")}
+                       title="Listen to this message"
+                     >
+                       <VolumeIcon className="w-3 h-3" />
+                     </button>
+                   )}
+                 </div>
+                 <p className="text-base leading-relaxed whitespace-pre-wrap break-words">
+                   {m.text}
+                 </p>
+               </div>
+             </div>
+           );
+        })}
 
-          {speechSupported && (
-            <button
-              type="button"
-              onClick={onToggleListening}
-              aria-pressed={listening}
-              aria-label={listening ? 'Stop voice input' : 'Start voice input'}
-              className={cx(
-                'btn h-[46px] w-[46px] shrink-0 p-0',
-                listening
-                  ? 'border-accent bg-accent text-white'
-                  : 'border-rule-strong bg-surface text-ink-muted hover:bg-surface-sunken',
-              )}
-            >
-              <MicIcon />
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={sending || !draft.trim()}
-            className="btn-primary h-[46px] shrink-0"
-          >
-            Send
-          </button>
-        </div>
-
-        {synthesisSupported && (
-          <button
-            type="button"
-            onClick={onToggleVoiceReplies}
-            className="mt-2 text-[12px] text-ink-faint underline underline-offset-2"
-          >
-            {voiceReplies ? 'Turn off spoken replies' : 'Read replies aloud'}
-          </button>
+        {/* Interim / Draft */}
+        {(draft || interim) && (
+          <div className="flex flex-col items-end animate-rise">
+             <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl px-5 py-3 shadow-sm bg-accent/80 text-white rounded-tr-none">
+               <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80 mb-1">You</p>
+               <p className="text-base leading-relaxed whitespace-pre-wrap italic opacity-90 break-words">
+                 {draft + (interim ? (draft ? ' ' : '') + interim : '')}
+               </p>
+             </div>
+          </div>
         )}
+
+        {sending && (
+           <div className="flex flex-col items-start animate-rise">
+              <div className="bg-white border border-rule rounded-2xl rounded-tl-none px-5 py-4 shadow-sm flex items-center gap-3">
+                 <Spinner />
+                 <span className="text-sm font-medium text-ink-muted">Thinking...</span>
+              </div>
+           </div>
+        )}
+        <div ref={scrollRef} className="h-4 shrink-0" />
       </div>
+
+      {/* Bottom Input Bar */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-paper via-paper/90 to-transparent flex justify-center pb-8">
+        <div className="w-full max-w-3xl flex items-center gap-3">
+           <button 
+             onClick={onEnterHandsFree} 
+             className="p-3 bg-surface border border-rule rounded-full shadow-sm hover:bg-surface-sunken hover:border-ink transition-colors group relative flex-shrink-0" 
+             aria-label="Enter hands-free voice mode"
+             title="Switch to Hands-Free Voice Mode"
+           >
+              <HeadphonesIcon className="w-6 h-6 text-ink-muted group-hover:text-ink transition-colors" />
+           </button>
+           
+           <div className="flex-1 flex items-center gap-2 border border-rule rounded-full bg-surface py-2 px-4 shadow-sm focus-within:border-accent focus-within:shadow-md transition-all">
+              <input 
+                type="text" 
+                className="flex-1 bg-transparent outline-none text-ink placeholder-ink-faint text-base w-full" 
+                placeholder="Type your response..." 
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                   if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                      onSubmit(e.currentTarget.value);
+                   }
+                }}
+                disabled={sending || listening}
+              />
+              {speechSupported && (
+                <button 
+                  onClick={onToggleListening}
+                  className={cx("p-2 rounded-full transition-colors flex-shrink-0", listening ? "bg-risk-urgent text-white shadow-risk-urgent/40 shadow-lg animate-pulse" : "text-accent hover:bg-accent-soft")}
+                  title={listening ? "Stop listening" : "Start speaking"}
+                >
+                  {listening ? <MicActiveIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
+                </button>
+              )}
+              <button 
+                onClick={() => { if (draft.trim()) onSubmit(draft); }}
+                disabled={sending || listening || !draft.trim()}
+                className="text-accent font-semibold disabled:opacity-50 px-2 flex-shrink-0 hover:text-accent-hover transition-colors"
+              >
+                Send
+              </button>
+           </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-full max-w-xl px-4">
+          <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} onClose={onClearError} />
+        </div>
+      )}
     </div>
   );
 }
 
-function MicIcon() {
+function HandsFreeModeView({
+  messages,
+  sending,
+  speaking,
+  error,
+  lastFailedMessage,
+  language,
+  onRetry,
+  draft,
+  interim,
+  listening,
+  speechSupported,
+  onSubmit,
+  onToggleListening,
+  onExit,
+  onClearError,
+}: any) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, draft, interim, sending]);
+
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+    <div className="flex flex-col items-center justify-center min-h-[75vh] text-center space-y-6 relative pb-10">
+      <div className="absolute top-0 right-4 z-10 pt-4">
+        <button onClick={onExit} className="text-[13px] font-semibold text-ink-muted underline underline-offset-2 hover:text-ink transition-colors bg-paper/80 px-2 py-1 rounded">
+          Exit hands-free mode
+        </button>
+      </div>
+
+      {/* Spotify Lyrics Style Scrollable Container for Hands-Free */}
+      <div className="flex flex-col gap-10 px-6 sm:px-12 pt-16 pb-6 w-full max-w-4xl mx-auto h-[50vh] overflow-y-auto no-scrollbar">
+        {messages.length === 0 && !draft && !interim && !sending && (
+          <div className="opacity-50 mt-10">
+             <p className="text-[12px] font-semibold text-ink-faint uppercase tracking-wider mb-2">Assistant</p>
+             <h2 className="text-3xl sm:text-4xl font-bold text-ink leading-tight tracking-tight">Ready to begin.</h2>
+          </div>
+        )}
+
+        {messages.map((m: any, idx: number) => {
+           const isLast = idx === messages.length - 1 && !draft && !interim && !sending;
+           return (
+             <div key={idx} className={cx("transition-all duration-700 ease-out", isLast ? "opacity-100 scale-100" : "opacity-30 scale-95 blur-[0.5px]")}>
+               <p className={cx("text-[12px] font-semibold uppercase tracking-wider mb-2", m.sender === 'ai' ? 'text-ink-faint' : 'text-accent/70')}>
+                 {m.sender === 'ai' ? 'Assistant' : 'You'}
+               </p>
+               <h2 lang={m.sender === 'ai' ? language?.code : undefined} className="text-3xl sm:text-4xl font-bold text-ink leading-tight tracking-tight break-words">
+                 "{m.text}"
+               </h2>
+             </div>
+           );
+        })}
+
+        {/* Interim / Draft */}
+        {(draft || interim) && (
+          <div className="opacity-100 scale-100 animate-rise transition-all duration-700">
+             <p className="text-[12px] font-semibold text-accent/70 uppercase tracking-wider mb-2">You</p>
+             <h2 className="text-3xl sm:text-4xl font-bold text-ink-muted italic leading-tight tracking-tight break-words">
+               "{draft + (interim ? (draft ? ' ' : '') + interim : '')}"
+             </h2>
+          </div>
+        )}
+
+        {sending && (
+           <div className="opacity-100 scale-100 flex flex-col items-center justify-center gap-4 py-6 animate-pulse transition-all duration-700">
+              <Spinner />
+              <span className="text-xl font-bold text-ink-muted tracking-tight">Assistant is thinking...</span>
+           </div>
+        )}
+        <div ref={scrollRef} className="h-10 shrink-0" />
+      </div>
+
+      {/* Microphone Control */}
+      <div className="flex flex-col items-center gap-6">
+        {speechSupported ? (
+          <button
+            onClick={() => {
+               if (listening) {
+                 onToggleListening();
+                 setTimeout(() => onSubmit(), 200);
+               } else {
+                 onToggleListening();
+               }
+            }}
+            className={cx(
+              "flex items-center justify-center rounded-full w-24 h-24 sm:w-32 sm:h-32 transition-all duration-300 shadow-xl border-4",
+              listening 
+                ? "bg-risk-urgent border-risk-urgent text-white animate-pulse shadow-risk-urgent/40 scale-110" 
+                : speaking
+                ? "bg-amber-500 border-amber-500 text-white animate-pulse scale-105 shadow-amber-500/40"
+                : "bg-accent border-accent text-white hover:scale-105 hover:shadow-accent/40"
+            )}
+            aria-label={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Start speaking'}
+          >
+             {listening ? <MicActiveIcon className="w-10 h-10 sm:w-12 sm:h-12" /> : <MicIcon className="w-10 h-10 sm:w-12 sm:h-12" />}
+          </button>
+        ) : (
+          <p className="text-ink-muted text-sm border border-rule px-4 py-2 bg-surface">Microphone not supported on this device.</p>
+        )}
+        
+        <div className="flex flex-col items-center gap-2 h-10 mt-4">
+          {listening ? (
+             <p className="text-risk-urgent font-semibold text-lg animate-pulse uppercase tracking-wider">Listening...</p>
+          ) : speaking ? (
+             <p className="text-amber-600 font-semibold text-lg animate-pulse uppercase tracking-wider">Assistant speaking (Tap to interrupt)</p>
+          ) : sending ? (
+             <p className="text-accent font-semibold text-lg uppercase tracking-wider">Assistant is thinking...</p>
+          ) : (
+             <p className="text-accent font-semibold text-lg uppercase tracking-wider">Tap mic to speak</p>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} onClose={onClearError} />
+      )}
+    </div>
+  );
+}
+
+function HeadphonesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+    </svg>
+  );
+}
+
+function VolumeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+    </svg>
+  );
+}
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
       <rect x="9" y="3" width="6" height="11" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MicActiveIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+      <path d="M5 10v2a7 7 0 0 0 14 0v-2"></path>
+      <line x1="12" y1="19" x2="12" y2="22"></line>
     </svg>
   );
 }
