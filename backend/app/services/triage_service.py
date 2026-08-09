@@ -76,18 +76,32 @@ class TriageService:
     # ------------------------------------------------------------- sessions
 
     @staticmethod
-    def create_session(preferred_language: str, patient_name: str = "Patient") -> Tuple[PatientSession, TriageCase]:
+    def create_session(
+        preferred_language: str, 
+        patient_name: str = "Patient",
+        patient_id: Optional[str] = None
+    ) -> Tuple[PatientSession, TriageCase]:
         from app.shared.languages import resolve
 
         language = resolve(preferred_language)
-        session = PatientSession(
-            preferred_language=language.code,
-            patient_name=patient_name or "Patient",
-            status=PatientStatus.COLLECTING_INFORMATION,
-        )
+        
+        session_kwargs = {
+            "preferred_language": language.code,
+            "patient_name": patient_name or "Patient",
+            "status": PatientStatus.COLLECTING_INFORMATION,
+        }
+        if patient_id:
+            session_kwargs["patient_id"] = patient_id
+            
+        session = PatientSession(**session_kwargs)
+        
+        patient_profile = db.get_patient(session.patient_id) if session.patient_id else None
+        
         case = TriageCase(
             session_id=session.session_id,
             patient_id=session.patient_id,
+            patient_name=patient_profile.name if patient_profile else session.patient_name,
+            age=patient_profile.age if patient_profile else "",
             preferred_language=language.code,
         )
         case.transcript.append(ChatMessage(sender="ai", text=fq.greeting(language.code)))

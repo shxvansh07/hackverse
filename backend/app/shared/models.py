@@ -264,6 +264,13 @@ class Prescription(BaseModel):
         return self.status in (PrescriptionStatus.APPROVED, PrescriptionStatus.MODIFIED)
 
 
+class PatientProfile(BaseModel):
+    patient_id: str = Field(default_factory=lambda: _new_id("PAT", 6))
+    name: str = ""
+    age: str = ""
+    created_at: str = Field(default_factory=_now)
+
+
 class PatientSession(BaseModel):
     session_id: str = Field(default_factory=lambda: _new_id("SESS"))
     patient_id: str = Field(default_factory=lambda: _new_id("PAT", 6))
@@ -280,6 +287,7 @@ class TriageCase(BaseModel):
     case_id: str = Field(default_factory=lambda: _new_id("CASE"))
     session_id: str
     patient_id: str
+    patient_name: str = "Patient"
     preferred_language: str = "en"
 
     # --- structured clinical fields -------------------------------------
@@ -351,6 +359,12 @@ class TriageCase(BaseModel):
 class CreateSessionRequest(BaseModel):
     preferred_language: str = "en"
     patient_name: Optional[str] = "Patient"
+    patient_id: Optional[str] = None
+
+
+class CreateProfileRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    age: str = Field(..., min_length=1)
 
 
 class TriageMessageRequest(BaseModel):

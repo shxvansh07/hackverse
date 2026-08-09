@@ -29,6 +29,8 @@ import {
   type PresentedPrescription,
   type RiskState,
   type TriageCase,
+  type PatientProfile,
+  type PatientHistoryItem,
 } from '@/lib/api';
 import {
   SpeechInput,
@@ -46,12 +48,18 @@ import {
   cx,
 } from '@/components/ui/clinical';
 
-type Phase = 'language' | 'conversation' | 'waiting' | 'prescription' | 'visit-report';
+type Phase = 'auth' | 'dashboard' | 'language' | 'conversation' | 'waiting' | 'prescription' | 'visit-report';
 
 const POLL_INTERVAL_MS = 4000;
 
 export default function PatientPage() {
-  const [phase, setPhase] = useState<Phase>('language');
+  const [phase, setPhase] = useState<Phase>('auth');
+  const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
+  const [history, setHistory] = useState<PatientHistoryItem[]>([]);
+  const [authName, setAuthName] = useState('');
+  const [authAge, setAuthAge] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [loadingAuth, setLoadingAuth] = useState(false);
   const [languages, setLanguages] = useState<Language[]>([]);
   const [language, setLanguage] = useState<Language | null>(null);
 
@@ -108,6 +116,20 @@ export default function PatientPage() {
   /* ------------------------------------------------------------- bootstrap */
 
   useEffect(() => {
+    const savedProfile = window.localStorage.getItem('patient_profile');
+    if (savedProfile) {
+      try {
+        const profile = JSON.parse(savedProfile) as PatientProfile;
+        setPatientProfile(profile);
+        setPhase('dashboard');
+        loadHistory(profile.patient_id);
+      } catch (e) {
+        setPhase('auth');
+      }
+    } else {
+      setPhase('auth');
+    }
+
     api
       .listLanguages()
       .then(setLanguages)
@@ -126,6 +148,45 @@ export default function PatientPage() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
+
+  /* ------------------------------------------------------------- auth & dashboard */
+
+  const loadHistory = async (patientId: string) => {
+    try {
+      const hist = await api.getPatientHistory(patientId);
+      setHistory(hist);
+    } catch (err) {
+      console.error('Failed to load history', err);
+    }
+  };
+
+  const handleCreateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authName.trim() || !authAge.trim()) {
+      setAuthError('Name and age are required.');
+      return;
+    }
+    setLoadingAuth(true);
+    setAuthError('');
+    try {
+      const profile = await api.createProfile(authName.trim(), authAge.trim());
+      window.localStorage.setItem('patient_profile', JSON.stringify(profile));
+      setPatientProfile(profile);
+      setPhase('dashboard');
+      loadHistory(profile.patient_id);
+    } catch (err) {
+      setAuthError(err instanceof ApiError ? err.message : 'Failed to create profile');
+    } finally {
+      setLoadingAuth(false);
+    }
+  };
+
+  const handleLogout = () => {
+    window.localStorage.removeItem('patient_profile');
+    setPatientProfile(null);
+    setHistory([]);
+    setPhase('auth');
+  };
 
   /* --------------------------------------------------------- waiting poll */
 
@@ -191,7 +252,11 @@ export default function PatientPage() {
     setPhase('conversation');
 
     try {
-      const session = await api.startSession(selectedLang.code);
+      const session = await api.startSession(
+        selectedLang.code,
+        patientProfile?.name || 'Patient',
+        patientProfile?.patient_id
+      );
       setSessionId(session.session_id);
       setPatientStatus(session.status);
       setPrescriptionLang(selectedLang.code);
@@ -206,7 +271,7 @@ export default function PatientPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not start the session.');
     }
-  }, []);
+  }, [patientProfile]);
 
   const submitMessage = useCallback(
     async (text: string) => {
@@ -382,12 +447,46 @@ export default function PatientPage() {
 
   /* -------------------------------------------------------------- render */
 
+  if (phase === 'auth') {
+    return (
+      <AuthPhase
+        name={authName}
+        age={authAge}
+        onNameChange={setAuthName}
+        onAgeChange={setAuthAge}
+        onSubmit={handleCreateProfile}
+        loading={loadingAuth}
+        error={authError}
+      />
+    );
+  }
+
+  if (phase === 'dashboard') {
+    return (
+      <DashboardPhase
+        profile={patientProfile!}
+        history={history}
+        onStart={() => setPhase('language')}
+        onLogout={handleLogout}
+        onViewPrescription={(prescriptionId) => {
+          setLoadingPrescription(true);
+          api.getPrescription(prescriptionId, 'en').then((p) => {
+            setPrescription(p);
+            setPrescriptionLang('en');
+            setPhase('prescription');
+          }).finally(() => setLoadingPrescription(false));
+        }}
+      />
+    );
+  }
+
   if (phase === 'language') {
     return (
       <LanguageChooser
         languages={languages}
         error={error}
         onSelect={beginSession}
+        onBack={() => setPhase(patientProfile ? 'dashboard' : 'auth')}
       />
     );
   }
@@ -474,7 +573,8 @@ export default function PatientPage() {
             loading={loadingPrescription}
             onLanguageChange={changePrescriptionLanguage}
             clinicInfo={clinicInfo}
-            patientId={clinicalState?.patient_id ?? null}
+            patientId={clinicalState?.patient_id ?? patientProfile?.patient_id ?? null}
+            patientProfile={patientProfile}
           />
         )}
 
@@ -492,14 +592,19 @@ function LanguageChooser({
   languages,
   error,
   onSelect,
+  onBack,
 }: {
   languages: Language[];
   error: string | null;
   onSelect: (language: Language) => void;
+  onBack: () => void;
 }) {
   return (
     <div className="flex min-h-screen flex-col bg-paper">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-16">
+        <button onClick={onBack} className="mb-4 self-start text-sm font-medium text-ink-muted hover:text-ink">
+          ← Back
+        </button>
         <p className="label-meta">Multilingual clinical intake</p>
         <h1 className="mt-4 text-display font-semibold text-ink">
           Tell us how you
@@ -1086,10 +1191,12 @@ function PrintablePrescription({
   prescription,
   clinicInfo,
   patientId,
+  patientProfile,
 }: {
   prescription: PresentedPrescription;
   clinicInfo: ClinicInfo | null;
   patientId: string | null;
+  patientProfile?: PatientProfile | null;
 }) {
   const approvedAt = prescription.approved_at ? new Date(prescription.approved_at) : null;
 
@@ -1109,6 +1216,12 @@ function PrintablePrescription({
 
       <div className="mt-4 flex justify-between text-[13px]">
         <div>
+          {patientProfile?.name && (
+            <p className="text-base font-bold mb-1">
+              Patient Name: <span className="font-semibold">{patientProfile.name}</span>
+              {patientProfile.age ? ` (${patientProfile.age} yrs)` : ''}
+            </p>
+          )}
           <p>
             <span className="font-semibold">Patient ID:</span> {patientId ?? '—'}
           </p>
@@ -1212,6 +1325,7 @@ function PrescriptionView({
   onLanguageChange,
   clinicInfo,
   patientId,
+  patientProfile,
 }: {
   prescription: PresentedPrescription;
   languages: Language[];
@@ -1220,6 +1334,7 @@ function PrescriptionView({
   onLanguageChange: (code: string) => void;
   clinicInfo: ClinicInfo | null;
   patientId: string | null;
+  patientProfile?: PatientProfile | null;
 }) {
   const localised = activeLanguage !== 'en';
 
@@ -1235,6 +1350,7 @@ function PrescriptionView({
         prescription={prescription}
         clinicInfo={clinicInfo}
         patientId={patientId}
+        patientProfile={patientProfile}
       />
 
       <div className="animate-rise space-y-8 print:hidden">
@@ -1242,6 +1358,11 @@ function PrescriptionView({
           <div>
             <p className="label-meta text-risk-low">Approved by your doctor</p>
             <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
+            {patientProfile?.name && (
+              <p className="mt-1 text-base font-bold text-ink">
+                Patient: {patientProfile.name} {patientProfile.age ? `(Age: ${patientProfile.age})` : ''}
+              </p>
+            )}
             {prescription.doctor_name && (
               <p className="mt-2 text-[13px] text-ink-muted">
                 Reviewed by {prescription.doctor_name}
@@ -1376,5 +1497,140 @@ function PrescriptionView({
         </p>
       </div>
     </>
+  );
+}
+
+function AuthPhase({
+  name,
+  age,
+  onNameChange,
+  onAgeChange,
+  onSubmit,
+  loading,
+  error,
+}: {
+  name: string;
+  age: string;
+  onNameChange: (v: string) => void;
+  onAgeChange: (v: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  loading: boolean;
+  error: string;
+}) {
+  return (
+    <div className="flex min-h-screen flex-col bg-paper px-5 py-16 items-center justify-center">
+      <div className="w-full max-w-md">
+        <h1 className="text-display font-semibold text-ink mb-2">Welcome</h1>
+        <p className="text-body text-ink-muted mb-8">
+          Please enter your details to create a profile and save your consultations.
+        </p>
+        
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              className="w-full rounded border border-rule bg-surface px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
+              placeholder="e.g. John Doe"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Age</label>
+            <input
+              type="number"
+              value={age}
+              onChange={(e) => onAgeChange(e.target.value)}
+              className="w-full rounded border border-rule bg-surface px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
+              placeholder="e.g. 35"
+            />
+          </div>
+          
+          {error && <div className="text-red-500 text-sm">{error}</div>}
+          
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded bg-ink px-4 py-2.5 text-center font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? 'Continuing...' : 'Continue'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function DashboardPhase({
+  profile,
+  history,
+  onStart,
+  onLogout,
+  onViewPrescription,
+}: {
+  profile: PatientProfile;
+  history: PatientHistoryItem[];
+  onStart: () => void;
+  onLogout: () => void;
+  onViewPrescription: (id: string) => void;
+}) {
+  return (
+    <div className="min-h-screen bg-paper pb-32">
+      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 px-5 py-4 backdrop-blur">
+        <div className="mx-auto flex max-w-2xl items-center justify-between">
+          <div>
+            <h1 className="font-semibold text-ink">{profile.name}</h1>
+            <p className="text-xs text-ink-muted">Age: {profile.age}</p>
+          </div>
+          <button onClick={onLogout} className="text-sm text-ink-muted hover:text-ink transition-colors">
+            Logout
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-2xl px-5 pt-8">
+        <div className="mb-10">
+          <button
+            onClick={onStart}
+            className="w-full rounded-lg bg-ink py-4 text-center text-lg font-medium text-paper shadow-sm transition-opacity hover:opacity-90 active:opacity-100"
+          >
+            Start New Consultation
+          </button>
+        </div>
+
+        <SectionTitle>Past Consultations</SectionTitle>
+        {history.length === 0 ? (
+          <p className="mt-4 text-ink-muted">No past consultations found.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {history.map((item) => (
+              <div key={item.case_id} className="rounded-lg border border-rule bg-surface p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="font-medium text-ink line-clamp-1">{item.chief_complaint || 'No complaint specified'}</h3>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      {new Date(item.timestamp).toLocaleDateString()} at {new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </p>
+                  </div>
+                  <RiskBadge risk={item.triage_status} size="sm" />
+                </div>
+                
+                {item.has_prescription && item.prescription_id && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() => onViewPrescription(item.prescription_id!)}
+                      className="text-sm font-medium text-accent hover:underline"
+                    >
+                      View Prescription
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
   );
 }

@@ -24,6 +24,7 @@ from app.ai.providers import (
     DeepSeekProvider,
     GeminiProvider,
     GroqProvider,
+    IBMBobProvider,
     NvidiaNIMProvider,
     OpenAIProvider,
     extract_json_object,
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Vendor id -> (class, env key var, env model var, default model).
 # Adding a provider is one line here plus the adapter class.
 _REGISTRY: Dict[str, Tuple[type, str, str, str]] = {
+    "ibm": (IBMBobProvider, "IBM_BOB_API_KEY", "IBM_BOB_MODEL", "ibm/granite-3-8b-instruct"),
     "nvidia": (NvidiaNIMProvider, "NVIDIA_API_KEY", "NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
     "gemini": (GeminiProvider, "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-1.5-flash"),
     "groq": (GroqProvider, "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
@@ -43,8 +45,8 @@ _REGISTRY: Dict[str, Tuple[type, str, str, str]] = {
     "deepseek": (DeepSeekProvider, "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "deepseek-chat"),
 }
 
-# Spec default: NVIDIA NIM primary, Gemini as the documented alternative.
-_DEFAULT_ORDER = "nvidia,gemini,groq,openai,deepseek"
+# Spec default: IBM primary, Groq / Gemini as fallback.
+_DEFAULT_ORDER = "ibm,groq,gemini,nvidia,openai,deepseek"
 
 
 class AIService:
