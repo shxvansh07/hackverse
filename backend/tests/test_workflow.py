@@ -247,6 +247,59 @@ def test_draft_is_not_visible_to_patient():
     assert resp.json()["detail"]["reason"] == "AWAITING_DOCTOR_REVIEW"
 
 
+def _complete_low_risk_intake_with_phone(phone: str, symptom: str = "fever") -> tuple[str, str]:
+    """Same as _complete_low_risk_intake, but phone-linked so a second visit
+    resolves to the same patient_id."""
+    session_id = start_session("en", phone=phone)
+    case = db.get_case_by_session(session_id)
+
+    case.symptoms = [symptom]
+    case.duration = "3 days"
+    case.severity = "Moderate"
+    case.allergies = []
+    case.allergies_confirmed = True
+    case.medical_history = []
+    case.history_confirmed = True
+    case.chief_complaint = symptom
+    db.save_case(case)
+
+    assessed = client.post("/api/triage/assess", json={"session_id": session_id}).json()
+    assert assessed["triage_status"] == "LOW_RISK"
+    assert assessed["draft_generated"] is True
+
+    client.post("/api/cases", json={"session_id": session_id})
+    return session_id, case.case_id
+
+
+def test_returning_patient_history_feeds_next_draft():
+    """A second visit by the same (phone-linked) patient, after the first was
+    approved, should carry a history_context into the new draft's grounding —
+    the whole point of referencing a past record when inferring a diagnosis."""
+    phone = "9876500001"
+    session1, case1_id = _complete_low_risk_intake_with_phone(phone, symptom="fever")
+    headers = auth_headers()
+    approve = client.post(
+        f"/api/doctor/cases/{case1_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve.status_code == 200
+
+    session2, case2_id = _complete_low_risk_intake_with_phone(phone, symptom="body ache")
+    case1 = db.get_case(case1_id)
+    case2 = db.get_case(case2_id)
+    assert case1.patient_id == case2.patient_id  # same phone -> same patient
+
+    assert "history_context" in case2.grounding
+    assert "fever" in case2.grounding["history_context"]
+
+
+def test_first_time_patient_has_no_history_context():
+    _, case_id = _complete_low_risk_intake()
+    case = db.get_case(case_id)
+    assert "history_context" not in case.grounding
+
+
 def test_approved_prescription_reaches_the_patient():
     session_id, case_id = _complete_low_risk_intake()
     headers = auth_headers()

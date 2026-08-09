@@ -393,6 +393,7 @@ export default function DoctorDashboard() {
               detail={detail}
               onDecide={submitDecision}
               onAddNote={addNote}
+              onOpenCase={openCase}
             />
           )}
         </main>
@@ -407,6 +408,7 @@ function CaseReview({
   detail,
   onDecide,
   onAddNote,
+  onOpenCase,
 }: {
   detail: CaseDetail;
   onDecide: (
@@ -422,6 +424,7 @@ function CaseReview({
     },
   ) => Promise<void>;
   onAddNote: (text: string) => Promise<void>;
+  onOpenCase: (caseId: string) => void;
 }) {
   const router = useRouter();
   const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation, record } = detail;
@@ -604,7 +607,12 @@ function CaseReview({
 
           <div className="mt-4 divide-y divide-rule border border-rule">
             {detail.patient_history.recent_cases.map((visit) => (
-              <div key={visit.case_id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <button
+                key={visit.case_id}
+                type="button"
+                onClick={() => onOpenCase(visit.case_id)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-sunken"
+              >
                 <div>
                   <p className="text-[14px] text-ink">
                     {visit.chief_complaint || 'Unspecified complaint'}
@@ -614,7 +622,7 @@ function CaseReview({
                   </p>
                 </div>
                 <RiskBadge risk={visit.triage_status} size="sm" />
-              </div>
+              </button>
             ))}
           </div>
         </section>

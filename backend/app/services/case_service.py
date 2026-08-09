@@ -15,6 +15,7 @@ from app.ai.service import ai_service
 from app.rag.engine import rag_engine
 from app.safety import guards, specialty
 from app.safety.engine import SafetyAssessment
+from app.services.record_service import RecordService
 from app.services.triage_service import TriageService
 from app.shared.database import db
 from app.shared.models import (
@@ -109,11 +110,16 @@ class CaseService:
         goes to a doctor with no prescription attached, which is the correct
         outcome, not a failure.
         """
+        history_context = RecordService.build_history_digest(
+            case.patient_id, exclude_case_id=case.case_id,
+        ) or ""
+
         prescription, grounding = rag_engine.build_draft(
             case_id=case.case_id,
             symptoms=case.symptoms,
             associated_symptoms=case.associated_symptoms,
             summary=case.summary_en,
+            history_context=history_context,
         )
 
         allergy_check = guards.check_allergy_conflict(
@@ -145,6 +151,7 @@ class CaseService:
                 "severity": case.severity,
                 "medical_history": case.medical_history,
                 "allergies": case.allergies,
+                "prior_history": history_context or "None on record.",
             },
             medications=[m.model_dump() for m in prescription.medications],
             guidance=grounding.get("guidance", []),

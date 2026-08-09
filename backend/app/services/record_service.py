@@ -8,6 +8,8 @@ services; this module only reads them back into one shape.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from app.shared.database import db
 from app.shared.models import CaseRecord, TriageCase
 
@@ -31,3 +33,35 @@ class RecordService:
             encounter_note=consultation.report_en if consultation else None,
             prescription=final_prescription,
         )
+
+    @staticmethod
+    def build_history_digest(patient_id: str, exclude_case_id: str) -> Optional[str]:
+        """A compact, clinical-vocabulary digest of a returning patient's most
+        recent prior visits — dates, conditions, drugs, nothing narrative.
+
+        Feeds two different consumers (see CaseService._generate_draft): a
+        TF-IDF retrieval query, where free prose would just dilute the match,
+        and an LLM rationale prompt, where it lets the model note continuity
+        with a prior visit. Never a source of medication — only the curated
+        formulary/ML fallback inside rag_engine.build_draft can do that.
+        """
+        prior_cases = db.get_cases_by_patient(patient_id, exclude_case_id=exclude_case_id)
+        if not prior_cases:
+            return None
+
+        lines = []
+        for case in prior_cases[:3]:
+            date = case.created_at.split("T")[0]
+            complaint = case.chief_complaint or (case.symptoms[0] if case.symptoms else "unspecified complaint")
+
+            prescription = db.get_prescription_for_case(case.case_id)
+            if prescription and prescription.is_final:
+                condition = prescription.matched_condition or prescription.icd10_title or "unspecified condition"
+                meds = ", ".join(m.name for m in prescription.medications) or "no medication"
+                outcome = f"diagnosed {condition}, prescribed {meds}"
+            else:
+                outcome = "no medication on record"
+
+            lines.append(f"{date}: {complaint} — {outcome}.")
+
+        return " ".join(lines)
