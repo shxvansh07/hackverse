@@ -78,6 +78,7 @@ def create_patient_session(payload: CreateSessionRequest):
     session, _ = TriageService.create_session(
         preferred_language=payload.preferred_language,
         patient_name=payload.patient_name or "Patient",
+        phone=payload.phone,
     )
     return session
 

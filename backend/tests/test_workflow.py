@@ -44,8 +44,11 @@ def auth_headers() -> dict:
     return {"Authorization": f"Bearer {resp.json()['token']}"}
 
 
-def start_session(language: str = "en") -> str:
-    resp = client.post("/api/patient/session", json={"preferred_language": language})
+def start_session(language: str = "en", phone: str | None = None) -> str:
+    body = {"preferred_language": language}
+    if phone:
+        body["phone"] = phone
+    resp = client.post("/api/patient/session", json=body)
     assert resp.status_code == 200
     return resp.json()["session_id"]
 
@@ -580,3 +583,167 @@ def test_urgent_case_never_receives_a_prescription_via_live_consultation():
     assert case.prescription_id is None
     assert db.get_prescription_for_case(case.case_id) is None
     assert case.review_status == "URGENT"
+
+
+# ---------------------------------------------------------------------------
+# Patient history (phone-linked identity)
+# ---------------------------------------------------------------------------
+
+def test_same_phone_links_two_visits_to_the_same_patient():
+    sid1 = start_session("en", phone="+91 98765-43210")
+    sid2 = start_session("en", phone="9876543210")  # same number, different formatting
+    case1 = db.get_case_by_session(sid1)
+    case2 = db.get_case_by_session(sid2)
+    assert case1.patient_id == case2.patient_id
+
+
+def test_different_phones_get_different_patients():
+    sid1 = start_session("en", phone="9876543210")
+    sid2 = start_session("en", phone="9123456780")
+    case1 = db.get_case_by_session(sid1)
+    case2 = db.get_case_by_session(sid2)
+    assert case1.patient_id != case2.patient_id
+
+
+def test_blank_phone_behaves_exactly_as_before_phone_identity_existed():
+    """No phone given must never accidentally link two strangers."""
+    sid1 = start_session("en")
+    sid2 = start_session("en")
+    case1 = db.get_case_by_session(sid1)
+    case2 = db.get_case_by_session(sid2)
+    assert case1.patient_id != case2.patient_id
+
+
+def test_returning_patient_carries_forward_settled_allergy_and_history():
+    sid1 = start_session("en", phone="9876543210")
+    case1 = db.get_case_by_session(sid1)
+    case1.allergies = ["Penicillin"]
+    case1.allergies_confirmed = True
+    case1.medical_history = ["Hypertension"]
+    case1.history_confirmed = True
+    case1.handed_off = True  # only a completed visit counts as history
+    db.save_case(case1)
+
+    sid2 = start_session("en", phone="9876543210")
+    case2 = db.get_case_by_session(sid2)
+    assert case2.allergies == ["Penicillin"]
+    assert case2.allergies_confirmed is True
+    assert case2.medical_history == ["Hypertension"]
+    assert case2.history_confirmed is True
+    assert case2.carried_forward_from_previous_visit is True
+
+
+def test_returning_patient_never_carries_forward_symptoms_or_red_flags():
+    """Only settled allergy/history status is additive across visits — a
+    fresh visit must always be assessed on what THIS visit's patient says,
+    not on last time's complaint."""
+    sid1 = start_session("en", phone="9876543210")
+    send(sid1, "I have severe chest pain and cannot breathe")
+    case1 = db.get_case_by_session(sid1)
+    assert case1.triage_status == "URGENT"
+
+    sid2 = start_session("en", phone="9876543210")
+    case2 = db.get_case_by_session(sid2)
+    assert case2.symptoms == []
+    assert case2.red_flags == []
+    assert case2.triage_status != "URGENT"
+
+
+def test_abandoned_case_does_not_count_as_history_or_carry_forward():
+    """A case still mid-conversation (never handed off) is not a completed
+    visit — same principle as the doctor queue itself (list_cases only shows
+    handed_off=True). Showing an abandoned chat as 'history', or carrying its
+    partial data forward, would be misleading rather than helpful."""
+    sid1 = start_session("en", phone="9990001111")
+    case1 = db.get_case_by_session(sid1)
+    case1.allergies = ["Penicillin"]
+    case1.allergies_confirmed = True
+    db.save_case(case1)  # handed_off left False: intake never finished
+
+    sid2 = start_session("en", phone="9990001111")
+    case2 = db.get_case_by_session(sid2)
+    assert case2.allergies == []
+    assert case2.allergies_confirmed is False
+    assert case2.carried_forward_from_previous_visit is False
+
+    case2.chief_complaint = "headache"
+    db.save_case(case2)
+    detail = client.get(f"/api/doctor/cases/{case2.case_id}", headers=auth_headers()).json()
+    assert detail["patient_history"] is None
+
+
+# ---------------------------------------------------------------------------
+# Doctor-to-doctor case notes
+# ---------------------------------------------------------------------------
+
+def test_doctor_can_add_and_read_a_case_note():
+    session_id = start_session("en")
+    send(session_id, "I have a mild headache")
+    case = db.get_case_by_session(session_id)
+    client.post("/api/cases", json={"session_id": session_id})
+
+    headers = auth_headers()
+    resp = client.post(
+        f"/api/doctor/cases/{case.case_id}/notes",
+        json={"text": "Recheck BP next visit — was borderline last time."},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    note = resp.json()
+    assert note["text"] == "Recheck BP next visit — was borderline last time."
+    assert note["doctor_id"] == "DR-101"
+
+    detail = client.get(f"/api/doctor/cases/{case.case_id}", headers=headers).json()
+    assert len(detail["case"]["case_notes"]) == 1
+    assert detail["case"]["case_notes"][0]["text"] == note["text"]
+
+
+def test_case_note_requires_doctor_auth():
+    session_id = start_session("en")
+    case = db.get_case_by_session(session_id)
+    resp = client.post(f"/api/doctor/cases/{case.case_id}/notes", json={"text": "unauthorized"})
+    assert resp.status_code in (401, 403)
+
+
+def test_case_note_on_unknown_case_is_404():
+    resp = client.post(
+        "/api/doctor/cases/CASE-DOES-NOT-EXIST/notes",
+        json={"text": "hello"},
+        headers=auth_headers(),
+    )
+    assert resp.status_code == 404
+
+
+def test_first_time_patient_has_no_history_block():
+    sid = start_session("en", phone="9998887776")
+    case = db.get_case_by_session(sid)
+    case.symptoms = ["fever"]
+    case.chief_complaint = "fever"
+    db.save_case(case)
+
+    detail = client.get(f"/api/doctor/cases/{case.case_id}", headers=auth_headers()).json()
+    assert detail["patient_history"] is None
+
+
+def test_returning_patient_case_detail_includes_visit_history():
+    sid1 = start_session("en", phone="9998887776")
+    case1 = db.get_case_by_session(sid1)
+    case1.chief_complaint = "fever"
+    case1.handed_off = True  # only a completed visit counts as history
+    db.save_case(case1)
+
+    sid2 = start_session("en", phone="9998887776")
+    case2 = db.get_case_by_session(sid2)
+    case2.chief_complaint = "headache"
+    db.save_case(case2)
+
+    detail = client.get(f"/api/doctor/cases/{case2.case_id}", headers=auth_headers()).json()
+    history = detail["patient_history"]
+    assert history is not None
+    assert history["visit_count"] == 1
+    assert history["recent_cases"][0]["case_id"] == case1.case_id
+    assert history["recent_cases"][0]["chief_complaint"] == "fever"
+    # No LLM configured in this test file (see module header) — the
+    # structured visit list must still be present even when the optional
+    # highlight isn't.
+    assert history["highlight"] is None

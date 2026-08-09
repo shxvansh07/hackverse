@@ -163,8 +163,19 @@ export interface TriageCase {
   grounding: Record<string, unknown>;
   handed_off: boolean;
   handed_off_at: string | null;
+  case_notes: CaseNote[];
   created_at: string;
   updated_at: string;
+}
+
+/** Doctor-to-doctor note on a case — append-only, e.g. a senior doctor
+ * flagging context for whoever reviews it next. */
+export interface CaseNote {
+  note_id: string;
+  doctor_id: string;
+  doctor_name: string;
+  text: string;
+  created_at: string;
 }
 
 /** Doctor-side view. May be an unapproved AI draft — check `is_ai_draft`. */
@@ -277,6 +288,20 @@ export interface PatientStatusResponse {
   visit_report_lang: string | null;
 }
 
+export interface PatientHistoryRecentCase {
+  case_id: string;
+  created_at: string;
+  chief_complaint: string;
+  triage_status: RiskState;
+}
+
+export interface PatientHistory {
+  visit_count: number;
+  recent_cases: PatientHistoryRecentCase[];
+  carried_forward: boolean;
+  highlight: string | null;
+}
+
 export interface CaseDetail {
   case: TriageCase;
   prescription_draft: Prescription | null;
@@ -288,6 +313,7 @@ export interface CaseDetail {
   appointment: Appointment | null;
   referral: ReferralInfo | null;
   consultation: LiveConsultation | null;
+  patient_history: PatientHistory | null;
 }
 
 export interface AuditEvent {
@@ -386,10 +412,14 @@ export const api = {
 
   getClinicInfo: () => request<ClinicInfo>('/api/clinic-info'),
 
-  startSession: (language: string, patientName = 'Patient') =>
+  startSession: (language: string, patientName = 'Patient', phone?: string) =>
     request<PatientSession>('/api/patient/session', {
       method: 'POST',
-      body: JSON.stringify({ preferred_language: language, patient_name: patientName }),
+      body: JSON.stringify({
+        preferred_language: language,
+        patient_name: patientName,
+        phone: phone || undefined,
+      }),
     }),
 
   sendMessage: (sessionId: string, message: string) =>
@@ -479,6 +509,13 @@ export const api = {
 
   getCaseDetail: (caseId: string) =>
     request<CaseDetail>(`/api/doctor/cases/${caseId}`, {}, true),
+
+  addCaseNote: (caseId: string, text: string) =>
+    request<CaseNote>(
+      `/api/doctor/cases/${caseId}/notes`,
+      { method: 'POST', body: JSON.stringify({ text }) },
+      true,
+    ),
 
   submitDecision: (
     caseId: string,

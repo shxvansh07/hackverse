@@ -175,6 +175,15 @@ export default function DoctorDashboard() {
     }
   }, []);
 
+  const addNote = useCallback(
+    async (text: string) => {
+      if (!selectedId) return;
+      await api.addCaseNote(selectedId, text);
+      await refreshDetail(selectedId);
+    },
+    [selectedId, refreshDetail],
+  );
+
   const openCase = useCallback(async (caseId: string) => {
     setSelectedId(caseId);
     setLoadingDetail(true);
@@ -378,7 +387,12 @@ export default function DoctorDashboard() {
           )}
 
           {!loadingDetail && detail && (
-            <CaseReview key={detail.case.case_id} detail={detail} onDecide={submitDecision} />
+            <CaseReview
+              key={detail.case.case_id}
+              detail={detail}
+              onDecide={submitDecision}
+              onAddNote={addNote}
+            />
           )}
         </main>
       </div>
@@ -391,6 +405,7 @@ export default function DoctorDashboard() {
 function CaseReview({
   detail,
   onDecide,
+  onAddNote,
 }: {
   detail: CaseDetail;
   onDecide: (
@@ -405,6 +420,7 @@ function CaseReview({
       offlineClinicLocation?: string;
     },
   ) => Promise<void>;
+  onAddNote: (text: string) => Promise<void>;
 }) {
   const router = useRouter();
   const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation } = detail;
@@ -414,6 +430,8 @@ function CaseReview({
   const [medications, setMedications] = useState<Medication[]>(draft?.medications ?? []);
   const [instructions, setInstructions] = useState(draft?.instructions ?? '');
   const [busy, setBusy] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
 
   const [referralSpecialty, setReferralSpecialty] = useState(
     kase.recommended_specialty || REFERRAL_SPECIALTIES[0],
@@ -471,6 +489,18 @@ function CaseReview({
   const updateMedication = (index: number, patch: Partial<Medication>) =>
     setMedications((prev) => prev.map((m, i) => (i === index ? { ...m, ...patch } : m)));
 
+  const submitNote = async () => {
+    const text = newNoteText.trim();
+    if (!text) return;
+    setAddingNote(true);
+    try {
+      await onAddNote(text);
+      setNewNoteText('');
+    } finally {
+      setAddingNote(false);
+    }
+  };
+
   return (
     <div className="pb-40">
       {/* ---------------------------------------------------- summary first */}
@@ -499,6 +529,48 @@ function CaseReview({
           </p>
         )}
       </section>
+
+      {/* --------------------------------------------------- patient history */}
+      {detail.patient_history && (
+        <section className="border-b border-rule px-8 py-6">
+          <SectionTitle
+            note={`${detail.patient_history.visit_count} prior visit${
+              detail.patient_history.visit_count === 1 ? '' : 's'
+            }`}
+          >
+            Patient history
+          </SectionTitle>
+
+          {detail.patient_history.carried_forward && (
+            <p className="mt-3 text-[13px] text-ink-muted">
+              Allergy and medical history carried forward from a previous visit — not re-asked
+              this visit. Review before relying on it.
+            </p>
+          )}
+
+          {detail.patient_history.highlight && (
+            <p className="mt-3 max-w-reading text-[14px] leading-relaxed text-ink">
+              {detail.patient_history.highlight}
+            </p>
+          )}
+
+          <div className="mt-4 divide-y divide-rule border border-rule">
+            {detail.patient_history.recent_cases.map((visit) => (
+              <div key={visit.case_id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div>
+                  <p className="text-[14px] text-ink">
+                    {visit.chief_complaint || 'Unspecified complaint'}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-ink-faint">
+                    {new Date(visit.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <RiskBadge risk={visit.triage_status} size="sm" />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ------------------------------------------------------ safety first */}
       {kase.triage_status === 'URGENT' && (
@@ -561,6 +633,45 @@ function CaseReview({
             </ul>
           </div>
         ) : null}
+      </section>
+
+      {/* ------------------------------------------------------------ case notes */}
+      <section className="border-b border-rule px-8 py-6">
+        <SectionTitle note="Doctor to doctor">Case notes</SectionTitle>
+
+        {kase.case_notes.length > 0 ? (
+          <ul className="mt-4 space-y-4">
+            {kase.case_notes.map((note) => (
+              <li key={note.note_id} className="border-l-2 border-rule pl-4">
+                <p className="max-w-reading text-[14px] leading-relaxed text-ink">{note.text}</p>
+                <p className="mt-1 text-[12px] text-ink-faint">
+                  {note.doctor_name} · {new Date(note.created_at).toLocaleString()}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-[13px] text-ink-faint">
+            No notes yet. Leave context here for whoever reviews this case next.
+          </p>
+        )}
+
+        <div className="mt-4 flex items-start gap-3">
+          <textarea
+            value={newNoteText}
+            onChange={(e) => setNewNoteText(e.target.value)}
+            placeholder="Add a note for whoever reviews this case next…"
+            rows={2}
+            className="field flex-1"
+          />
+          <button
+            onClick={submitNote}
+            disabled={addingNote || !newNoteText.trim()}
+            className="btn-secondary shrink-0"
+          >
+            {addingNote ? 'Adding…' : 'Add note'}
+          </button>
+        </div>
       </section>
 
       {/* ------------------------------------------------------- clinical detail */}

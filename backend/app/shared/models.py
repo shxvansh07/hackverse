@@ -153,6 +153,20 @@ class ChatMessage(BaseModel):
     timestamp: str = Field(default_factory=_now)
 
 
+class CaseNote(BaseModel):
+    """One doctor-to-doctor note on a case — e.g. a senior doctor flagging
+    context for whoever reviews it next. Distinct from Prescription.doctor_notes
+    (a single field tied to one prescription decision, overwritten each time):
+    this is an append-only thread at the case level, visible regardless of
+    which prescription is current."""
+
+    note_id: str = Field(default_factory=lambda: _new_id("NOTE", 6))
+    doctor_id: str
+    doctor_name: str
+    text: str = Field(..., min_length=1, max_length=2000)
+    created_at: str = Field(default_factory=_now)
+
+
 class SafetySignal(BaseModel):
     """A snapshot of one deterministic safety evaluation.
 
@@ -299,6 +313,12 @@ class TriageCase(BaseModel):
     allergies_confirmed: bool = False
     history_confirmed: bool = False
 
+    #: True when allergies/medical_history above were pre-populated from a
+    #: prior visit by the same (phone-linked) patient rather than stated in
+    #: this visit's own conversation. Doctor-facing signal only — never used
+    #: by the safety engine, which treats *_confirmed as settled either way.
+    carried_forward_from_previous_visit: bool = False
+
     # --- safety ----------------------------------------------------------
     red_flags: List[str] = Field(default_factory=list)
     missing_information: List[str] = Field(default_factory=list)
@@ -321,6 +341,11 @@ class TriageCase(BaseModel):
     grounding: Dict[str, Any] = Field(default_factory=dict)
     handed_off: bool = False
     handed_off_at: Optional[str] = None
+
+    #: Doctor-to-doctor notes on this case — e.g. a senior doctor flagging
+    #: something for whoever reviews it next. Append-only, never edited or
+    #: cleared by a prescription decision (unlike Prescription.doctor_notes).
+    case_notes: List[CaseNote] = Field(default_factory=list)
 
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
@@ -351,6 +376,11 @@ class TriageCase(BaseModel):
 class CreateSessionRequest(BaseModel):
     preferred_language: str = "en"
     patient_name: Optional[str] = "Patient"
+    #: Optional. When provided, links this visit to any past visits by the
+    #: same phone number (see database.get_or_create_patient_id) so the
+    #: doctor sees history and settled allergy/history facts carry forward.
+    #: Left blank, behaviour is unchanged from before this field existed.
+    phone: Optional[str] = None
 
 
 class TriageMessageRequest(BaseModel):
@@ -453,6 +483,10 @@ class DoctorDecisionResponse(BaseModel):
     prescription: Optional[Prescription] = None
     released_to_patient: bool
     message: str
+
+
+class AddCaseNoteRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
 
 
 class PrescriptionUpdateRequest(BaseModel):

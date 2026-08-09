@@ -250,6 +250,30 @@ def build_summary_messages(case_dict: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 # --------------------------------------------------------------------------
+# Cross-visit history highlight for a returning patient
+# --------------------------------------------------------------------------
+
+_HISTORY_SUMMARY_SYSTEM = """You write a short highlight for a doctor about to see a RETURNING patient, based on their past visits only.
+
+RULES
+- Use only facts present in the structured visit list given to you. Add nothing, infer nothing.
+- This is NOT a diagnosis and must not suggest one. Do not connect past and current complaints causally ("this may be related to") — state facts, let the doctor draw conclusions.
+- Call out only what a doctor would actually want flagged before seeing this patient: a recurring or worsening complaint across visits, an escalation pattern (e.g. a past URGENT visit), or a documented allergy/medical history — never routine or resolved single-visit complaints with nothing notable about them.
+- If nothing in the history is actually notable beyond "they have been seen before", say so plainly rather than manufacturing significance.
+- 25 to 60 words. Neutral clinical register. One paragraph, no headings, no bullets.
+
+Return the paragraph only."""
+
+
+def build_history_summary_messages(visits: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    payload = json.dumps(visits, ensure_ascii=False, indent=2)
+    return [
+        {"role": "system", "content": _HISTORY_SUMMARY_SYSTEM},
+        {"role": "user", "content": f"Past visits, most recent first:\n{payload}"},
+    ]
+
+
+# --------------------------------------------------------------------------
 # Draft rationale
 # --------------------------------------------------------------------------
 

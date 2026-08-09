@@ -19,6 +19,7 @@ import logging
 import os
 import tempfile
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -50,6 +51,23 @@ def _data_dir() -> Path:
     return path
 
 
+def _new_patient_id() -> str:
+    """Same shape as PatientSession.patient_id's own default factory
+    (models.py's private _new_id) — kept as a small local helper rather than
+    importing a leading-underscore name across modules."""
+    return f"PAT-{uuid.uuid4().hex[:6].upper()}"
+
+
+def normalize_phone(phone: str) -> str:
+    """Strip everything but digits, and a leading country code of '91'
+    (India), so '+91 98765-43210' and '9876543210' key the same patient.
+    Empty/whitespace-only input normalises to ''."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    return digits
+
+
 class ClinicalStore:
     """Repository for sessions, cases, prescriptions and audit events."""
 
@@ -60,6 +78,9 @@ class ClinicalStore:
         self.appointments: Dict[str, Appointment] = {}
         self.consultations: Dict[str, LiveConsultation] = {}
         self.audit: List[AuditEvent] = []
+        #: normalized phone -> patient_id. The only mechanism by which a
+        #: returning patient's new visit is linked to their past ones.
+        self.phone_index: Dict[str, str] = {}
 
         self._persist = persist and os.getenv("PERSIST_STATE", "1") != "0"
         self._lock = threading.RLock()
@@ -93,6 +114,7 @@ class ClinicalStore:
             "prescriptions": {k: v.model_dump() for k, v in self.prescriptions.items()},
             "appointments": {k: v.model_dump() for k, v in self.appointments.items()},
             "consultations": {k: v.model_dump() for k, v in self.consultations.items()},
+            "phone_index": dict(self.phone_index),
         }
         target = self._state_path()
         try:
@@ -133,6 +155,7 @@ class ClinicalStore:
                 k: LiveConsultation.model_validate(v)
                 for k, v in payload.get("consultations", {}).items()
             }
+            self.phone_index = dict(payload.get("phone_index", {}))
             logger.info(
                 "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations",
                 len(self.sessions), len(self.cases), len(self.prescriptions),
@@ -142,6 +165,7 @@ class ClinicalStore:
             logger.error("State snapshot incompatible, starting empty: %s", exc)
             self.sessions, self.cases, self.prescriptions = {}, {}, {}
             self.appointments, self.consultations = {}, {}
+            self.phone_index = {}
 
     # ----------------------------------------------------------------- audit
 
@@ -230,6 +254,43 @@ class ClinicalStore:
                 return case
         return None
 
+    def get_or_create_patient_id(self, phone: str) -> str:
+        """Look up a returning patient by phone, or mint a new patient_id and
+        record it. Blank/unnormalisable phone always gets a fresh id — no
+        identity linking without a real phone number."""
+        normalized = normalize_phone(phone)
+        if not normalized:
+            return _new_patient_id()
+        with self._lock:
+            existing = self.phone_index.get(normalized)
+            if existing:
+                return existing
+            patient_id = _new_patient_id()
+            self.phone_index[normalized] = patient_id
+            self._save()
+            return patient_id
+
+    def get_cases_by_patient(
+        self, patient_id: str, exclude_case_id: Optional[str] = None, handed_off_only: bool = True,
+    ) -> List[TriageCase]:
+        """One patient's past cases, newest first. Used to build the
+        doctor-facing visit history and to carry forward known allergy/
+        history facts into a new visit — see TriageService.create_session.
+
+        handed_off_only=True (the default, and what both callers above use)
+        excludes a case still mid-conversation — same principle as
+        list_cases()'s doctor queue: an abandoned or in-progress chat is not
+        a completed visit, and showing it as "history" would be misleading.
+        """
+        cases = [
+            c for c in self.cases.values()
+            if c.patient_id == patient_id
+            and c.case_id != exclude_case_id
+            and (c.handed_off or not handed_off_only)
+        ]
+        cases.sort(key=lambda c: c.created_at, reverse=True)
+        return cases
+
     def get_prescription(self, prescription_id: str) -> Optional[Prescription]:
         return self.prescriptions.get(prescription_id)
 
@@ -279,6 +340,7 @@ class ClinicalStore:
             self.appointments.clear()
             self.consultations.clear()
             self.audit.clear()
+            self.phone_index.clear()
 
     # ----------------------------------------------------------- demo seeds
 

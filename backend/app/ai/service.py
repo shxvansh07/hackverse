@@ -221,6 +221,19 @@ class AIService:
         summary = " ".join(response.text.split())
         return summary or None
 
+    async def generate_history_summary(self, visits: List[Dict[str, Any]]) -> Optional[str]:
+        """Cross-visit highlight for a returning patient. Supplementary only —
+        callers must not depend on this; the structured visit list itself
+        (see doctor_backend.router's patient_history block) is always
+        available regardless of whether this succeeds."""
+        response = await self._complete(
+            prompts.build_history_summary_messages(visits), temperature=0.1, max_tokens=140,
+        )
+        if response is None:
+            return None
+        summary = " ".join(response.text.split())
+        return summary or None
+
     async def generate_rationale(
         self,
         case_dict: Dict[str, Any],

@@ -14,9 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
+from app.services.triage_service import TriageService
 from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
 from app.shared.database import db
 from app.shared.models import (
+    AddCaseNoteRequest,
+    CaseNote,
     ConsultationTurn,
     ConsultationTurnRequest,
     DecisionType,
@@ -99,7 +102,7 @@ def get_doctor_cases(
 
 
 @router.get("/api/doctor/cases/{case_id}")
-def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(require_doctor)):
+async def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(require_doctor)):
     """Full case detail.
 
     Unlike the patient view this deliberately includes the AI draft even when
@@ -122,7 +125,31 @@ def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(requir
         "appointment": db.get_appointment(case.appointment_id) if case.appointment_id else None,
         "referral": case.referral,
         "consultation": db.get_consultation(case.consultation_id) if case.consultation_id else None,
+        "patient_history": await TriageService.build_patient_history(case),
     }
+
+
+@router.post("/api/doctor/cases/{case_id}/notes", response_model=CaseNote)
+def add_case_note(
+    case_id: str, payload: AddCaseNoteRequest, doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Append a doctor-to-doctor note to a case — e.g. a senior doctor
+    flagging context for whoever reviews it next. Append-only; notes are
+    never edited or deleted, same invariant as the audit log."""
+    case = db.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    note = CaseNote(
+        doctor_id=doctor["doctor_id"], doctor_name=doctor["doctor_name"], text=payload.text,
+    )
+    case.case_notes.append(note)
+    db.save_case(case)
+    db.record_audit(
+        "CASE_NOTE_ADDED", case_id=case.case_id, actor=doctor["doctor_name"],
+        detail=f"Note added by {doctor['doctor_name']}",
+    )
+    return note
 
 
 @router.post("/api/doctor/cases/{case_id}/decision", response_model=DoctorDecisionResponse)

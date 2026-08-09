@@ -185,13 +185,13 @@ export default function PatientPage() {
 
   /* ----------------------------------------------------------- actions */
 
-  const beginSession = useCallback(async (selectedLang: Language) => {
+  const beginSession = useCallback(async (selectedLang: Language, phone?: string) => {
     setLanguage(selectedLang);
     setError(null);
     setPhase('conversation');
 
     try {
-      const session = await api.startSession(selectedLang.code);
+      const session = await api.startSession(selectedLang.code, 'Patient', phone);
       setSessionId(session.session_id);
       setPatientStatus(session.status);
       setPrescriptionLang(selectedLang.code);
@@ -495,8 +495,10 @@ function LanguageChooser({
 }: {
   languages: Language[];
   error: string | null;
-  onSelect: (language: Language) => void;
+  onSelect: (language: Language, phone?: string) => void;
 }) {
+  const [phone, setPhone] = useState('');
+
   return (
     <div className="flex min-h-screen flex-col bg-paper">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-16">
@@ -511,13 +513,28 @@ function LanguageChooser({
           to a doctor. A doctor reviews every case and decides on any prescription.
         </p>
 
-        <div className="mt-12">
+        <div className="mt-10">
+          <label htmlFor="patient-phone" className="label-meta">
+            Phone number (optional)
+          </label>
+          <input
+            id="patient-phone"
+            type="tel"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="For your visit history — skip if you'd rather not share it"
+            className="field mt-3"
+          />
+        </div>
+
+        <div className="mt-8">
           <h2 className="label-meta">Choose your language</h2>
           <div className="mt-4 grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-3">
             {languages.map((lang) => (
               <button
                 key={lang.code}
-                onClick={() => onSelect(lang)}
+                onClick={() => onSelect(lang, phone.trim() || undefined)}
                 className="group flex flex-col items-start gap-1 bg-surface px-4 py-5 text-left transition-colors hover:bg-accent-soft"
               >
                 <span className="text-[17px] font-medium text-ink">{lang.native_name}</span>

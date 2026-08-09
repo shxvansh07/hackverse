@@ -76,27 +76,74 @@ class TriageService:
     # ------------------------------------------------------------- sessions
 
     @staticmethod
-    def create_session(preferred_language: str, patient_name: str = "Patient") -> Tuple[PatientSession, TriageCase]:
+    def create_session(
+        preferred_language: str, patient_name: str = "Patient", phone: Optional[str] = None,
+    ) -> Tuple[PatientSession, TriageCase]:
         from app.shared.languages import resolve
 
         language = resolve(preferred_language)
-        session = PatientSession(
+
+        # A phone number links this visit to any past ones by the same
+        # patient (see database.get_or_create_patient_id). Left blank, this
+        # behaves exactly as before phone-based identity existed: a fresh
+        # patient_id, no history.
+        patient_id = db.get_or_create_patient_id(phone) if phone else None
+
+        session_kwargs: Dict[str, Any] = dict(
             preferred_language=language.code,
             patient_name=patient_name or "Patient",
             status=PatientStatus.COLLECTING_INFORMATION,
         )
+        if patient_id:
+            session_kwargs["patient_id"] = patient_id
+        session = PatientSession(**session_kwargs)
+
         case = TriageCase(
             session_id=session.session_id,
             patient_id=session.patient_id,
             preferred_language=language.code,
         )
+
+        # Carry forward settled allergy/history facts from the most recent
+        # prior visit — never symptoms or red flags, and always auditable via
+        # a transcript entry, never silent. Scoped to the two fields already
+        # central to the safety engine's completeness check
+        # (safety.engine.compute_missing_information) rather than an
+        # open-ended history blob, so a returning patient isn't re-asked
+        # settled questions without risking the model treating unverified
+        # past narrative as a fact stated this visit.
+        prior_cases = db.get_cases_by_patient(patient_id) if patient_id else []
+        if prior_cases:
+            most_recent = prior_cases[0]
+            carried: List[str] = []
+            if most_recent.allergies_confirmed:
+                case.allergies = list(most_recent.allergies)
+                case.allergies_confirmed = True
+                carried.append("allergy status")
+            if most_recent.history_confirmed:
+                case.medical_history = list(most_recent.medical_history)
+                case.history_confirmed = True
+                carried.append("medical history")
+            if carried:
+                case.carried_forward_from_previous_visit = True
+                case.transcript.append(
+                    ChatMessage(
+                        sender="ai",
+                        text=(
+                            f"Carried forward from a previous visit: {', '.join(carried)}. "
+                            "The doctor can see and revise this."
+                        ),
+                    )
+                )
+
         case.transcript.append(ChatMessage(sender="ai", text=fq.greeting(language.code)))
 
         db.save_session(session)
         db.save_case(case)
         db.record_audit(
             "SESSION_CREATED", case_id=case.case_id, actor="patient",
-            detail=f"Session opened in {language.english_name}",
+            detail=f"Session opened in {language.english_name}"
+            + (" (returning patient)" if prior_cases else ""),
         )
         return session, case
 
@@ -426,3 +473,55 @@ class TriageService:
             parts.append(f"Red flags: {', '.join(case.red_flags)}.")
 
         return " ".join(parts)
+
+    # -------------------------------------------------------------- history
+
+    @classmethod
+    async def build_patient_history(cls, case: TriageCase) -> Optional[Dict[str, Any]]:
+        """Doctor-facing visit history for a returning (phone-linked)
+        patient, or None for a first-time patient.
+
+        The visit list itself is deterministic and always present when there
+        is history — it is a plain read of past cases, not a model output.
+        The `highlight` field is a supplementary LLM-generated one-line
+        summary and is genuinely optional: a timeout or provider failure
+        simply omits it, since the visit list alone is already useful.
+        """
+        prior_cases = db.get_cases_by_patient(case.patient_id, exclude_case_id=case.case_id)
+        if not prior_cases:
+            return None
+
+        recent = [
+            {
+                "case_id": c.case_id,
+                "created_at": c.created_at,
+                "chief_complaint": c.chief_complaint or (c.symptoms[0] if c.symptoms else ""),
+                "triage_status": c.triage_status.value,
+            }
+            for c in prior_cases[:5]
+        ]
+
+        highlight: Optional[str] = None
+        try:
+            visits_payload = [
+                {
+                    "created_at": c.created_at,
+                    "chief_complaint": c.chief_complaint,
+                    "symptoms": c.symptoms,
+                    "triage_status": c.triage_status.value,
+                    "red_flags": c.red_flags,
+                }
+                for c in prior_cases[:5]
+            ]
+            highlight = await asyncio.wait_for(
+                ai_service.generate_history_summary(visits_payload), timeout=3.5,
+            )
+        except Exception:
+            logger.warning("History highlight generation timed out or failed; omitting")
+
+        return {
+            "visit_count": len(prior_cases),
+            "recent_cases": recent,
+            "carried_forward": case.carried_forward_from_previous_visit,
+            "highlight": highlight,
+        }
