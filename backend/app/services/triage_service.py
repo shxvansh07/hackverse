@@ -23,6 +23,7 @@ from app.ai.schemas import ExtractedClinicalInfo
 from app.ai.service import ai_service
 from app.safety import engine as safety_engine
 from app.safety.engine import SafetyAssessment
+from app.services import deterministic_extraction
 from app.services import fallback_questions as fq
 from app.shared.database import db
 from app.shared.models import (
@@ -120,9 +121,11 @@ class TriageService:
         if extracted.age and not case.age:
             case.age = extracted.age
 
-        if extracted.allergies:
+        # A positive finding confirms the field; an explicit denial confirms it
+        # too, with an empty list. Only "neither happened" leaves it open.
+        if extracted.allergies or extracted.denies_allergies:
             case.allergies_confirmed = True
-        if extracted.medical_history:
+        if extracted.medical_history or extracted.denies_medical_history:
             case.history_confirmed = True
 
         if not case.chief_complaint and case.symptoms:
@@ -201,15 +204,24 @@ class TriageService:
         case.transcript.append(ChatMessage(sender="patient", text=patient_text))
 
         # --- step 2: structured extraction (model output, validated) --------
+        # Falls back to a keyword-based extractor when no provider is reachable,
+        # so a fully offline configuration can still reach LOW_RISK rather than
+        # looping the question bank forever with nothing ever recorded.
         history = [{"sender": m.sender, "text": m.text} for m in case.transcript[:-1]]
         extracted = await ai_service.extract_clinical_info(patient_text, history)
+        used_fallback_extraction = False
+
+        if extracted is None:
+            extracted = deterministic_extraction.extract(patient_text)
+            used_fallback_extraction = extracted is not None
 
         llm_hints: List[str] = []
         denies_more = False
 
         if extracted is not None:
             cls.merge_extraction(case, extracted)
-            llm_hints = extracted.possible_red_flags
+            if not used_fallback_extraction:
+                llm_hints = extracted.possible_red_flags
             denies_more = extracted.patient_denies_more_info
 
         if _is_negative(patient_text):

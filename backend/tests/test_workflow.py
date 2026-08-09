@@ -350,6 +350,65 @@ def test_unsupported_language_falls_back_to_english():
 
 
 # ---------------------------------------------------------------------------
+# Deterministic extraction fallback (no LLM configured at all)
+# ---------------------------------------------------------------------------
+
+def test_conversation_alone_reaches_a_draft_with_zero_providers():
+    """The real regression test: drive intake through actual patient messages
+    only, with no LLM configured, and confirm it still reaches a draft.
+
+    _complete_low_risk_intake() elsewhere in this file sets case fields
+    directly and does not exercise extraction at all — it would pass even if
+    extraction were completely broken. This test does not take that shortcut.
+    """
+    session_id = start_session("en")
+
+    r1 = send(session_id, "I have had a fever and body ache for 3 days")
+    assert "fever" in db.get_case_by_session(session_id).symptoms
+
+    r2 = send(session_id, "it is moderate, not severe")
+    r3 = send(session_id, "I have no allergies and no ongoing conditions")
+
+    case = db.get_case_by_session(session_id)
+    assert case.duration
+    assert case.allergies_confirmed is True
+    assert case.history_confirmed is True
+
+    r4 = send(session_id, "no, that's everything")
+    assert r4["is_complete"] is True
+    assert r4["triage_status"] == "LOW_RISK"
+
+    assessed = client.post("/api/triage/assess", json={"session_id": session_id}).json()
+    assert assessed["draft_generated"] is True
+
+    prescription = db.get_prescription_for_case(case.case_id)
+    assert prescription is not None
+    assert prescription.medications
+
+
+def test_hinglish_symptom_message_is_extracted_without_any_llm():
+    session_id = start_session("hi")
+    send(session_id, "Mujhe 3 din se fever hai aur body pain bhi hai")
+
+    case = db.get_case_by_session(session_id)
+    assert "fever" in case.symptoms
+    assert "body ache" in case.symptoms
+    assert case.duration
+
+
+def test_stated_allergy_is_recorded_not_hidden():
+    """If we cannot cleanly parse the substance, keep the patient's words
+    rather than silently marking allergies as none."""
+    session_id = start_session("en")
+    send(session_id, "I have a fever")
+    send(session_id, "I am allergic to penicillin")
+
+    case = db.get_case_by_session(session_id)
+    assert case.allergies_confirmed is True
+    assert any("penicillin" in a.lower() for a in case.allergies)
+
+
+# ---------------------------------------------------------------------------
 # Amendment and audit
 # ---------------------------------------------------------------------------
 

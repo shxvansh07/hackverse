@@ -184,9 +184,10 @@ def next_question(lang: str, missing: List[str], already_asked: List[str]) -> st
         if question and question not in already_asked:
             return question
 
-    for field in ordered:
-        question = QUESTIONS.get(field, {}).get(code)
-        if question and question not in already_asked:
-            return question
-
+    # Deliberately does not fall back to re-asking about a field outside
+    # `missing` — that field is either already known or was never required,
+    # and re-probing it would violate "never re-ask what we already know."
+    # If every still-missing field's question has already been asked verbatim
+    # (patient's answer did not parse), asking generically keeps the
+    # conversation moving without repeating a specific question.
     return QUESTIONS["anything_else"].get(code, QUESTIONS["anything_else"]["en"])

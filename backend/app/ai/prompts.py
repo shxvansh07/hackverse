@@ -136,7 +136,9 @@ Output exactly this JSON shape:
   "allergies": [],
   "age": null,
   "possible_red_flags": [],
-  "patient_denies_more_info": false
+  "patient_denies_more_info": false,
+  "denies_allergies": false,
+  "denies_medical_history": false
 }
 
 FIELD NOTES
@@ -150,6 +152,8 @@ FIELD NOTES
 - age: only if stated.
 - possible_red_flags: warning signs you noticed, as free text. This is a HINT for a separate deterministic checker. Being wrong here is safe; the checker is authoritative. Include anything worrying.
 - patient_denies_more_info: true only if they clearly signalled they have nothing to add ("no", "nahi", "that's all", "bas itna hi").
+- denies_allergies: true only if they explicitly said they have NO allergies (any language/phrasing). This is what records "no allergies" as a real answer instead of a gap — set it whenever they deny allergies, even inside a longer sentence, even if allergies is empty.
+- denies_medical_history: same idea, for explicitly denying any ongoing condition or medical history.
 
 Return the JSON object only. No prose, no code fences."""
 
