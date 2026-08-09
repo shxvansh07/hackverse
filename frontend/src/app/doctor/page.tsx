@@ -469,6 +469,82 @@ function CaseReview({
     kase.review_status === 'REFERRED' ||
     kase.review_status === 'OFFLINE_SCHEDULED';
 
+  // ------------------------------------------------------- trust & safety
+  // Every field read here already exists on `detail` — this only packages
+  // scattered guard results (case_service._generate_draft, rag/engine.py's
+  // retrieval) into one readable story instead of computing anything new.
+  const mlHypothesis = grounding?.ml_hypothesis as
+    | { condition?: string; confidence?: number }
+    | undefined;
+  const topMatchScore = grounding?.protocols?.[0]?.score as number | undefined;
+
+  type ScoreStatus = 'pass' | 'blocked' | 'na';
+  const scorecardRows: { label: string; status: ScoreStatus; detail: string }[] = [];
+
+  if (kase.triage_status === 'URGENT') {
+    scorecardRows.push({
+      label: 'Drafting gate',
+      status: 'blocked',
+      detail: `Blocked — URGENT. Red flags: ${kase.red_flags.join(', ') || 'unspecified'}.`,
+    });
+  } else if (kase.triage_status === 'UNCERTAIN') {
+    scorecardRows.push({
+      label: 'Drafting gate',
+      status: 'blocked',
+      detail: `Blocked — case classified UNCERTAIN. ${
+        safety?.reasons?.[0] || 'Doctor review required without an AI draft.'
+      }`,
+    });
+  } else {
+    scorecardRows.push({
+      label: 'Drafting gate',
+      status: 'pass',
+      detail: 'Eligible — LOW_RISK, deterministic intake complete.',
+    });
+  }
+
+  if (detail.draft_blocked && detail.draft_block_reason === 'ALLERGY_CONFLICT') {
+    scorecardRows.push({
+      label: 'Allergy cross-check',
+      status: 'blocked',
+      detail:
+        (grounding?.conflicts as string[] | undefined)?.join('; ') ||
+        'Conflict detected with a documented allergy.',
+    });
+  } else if (kase.allergies.length > 0 && draft) {
+    scorecardRows.push({
+      label: 'Allergy cross-check',
+      status: 'pass',
+      detail: 'Checked against documented allergies — no conflict.',
+    });
+  } else {
+    scorecardRows.push({
+      label: 'Allergy cross-check',
+      status: 'na',
+      detail: 'Not applicable — no allergies documented.',
+    });
+  }
+
+  if (draft?.matched_condition) {
+    scorecardRows.push({
+      label: 'Formulary grounding',
+      status: 'pass',
+      detail: 'Medication drawn verbatim from the curated formulary, never model-generated.',
+    });
+  } else if (mlHypothesis) {
+    scorecardRows.push({
+      label: 'Formulary grounding',
+      status: 'na',
+      detail: 'No confident formulary match — no medication drafted from this case.',
+    });
+  }
+
+  const scoreColor: Record<ScoreStatus, string> = {
+    pass: 'text-risk-low',
+    blocked: 'text-risk-urgent',
+    na: 'text-ink-faint',
+  };
+
   const run = async (decision: DecisionType) => {
     setBusy(true);
     try {
@@ -691,6 +767,73 @@ function CaseReview({
           </div>
         ) : null}
       </section>
+
+      {/* ---------------------------------------------------- safety checks */}
+      <section className="border-b border-rule px-8 py-6">
+        <SectionTitle note="Trust & safety">Safety checks</SectionTitle>
+        <ul className="mt-4 space-y-3">
+          {scorecardRows.map((row) => (
+            <li key={row.label} className="flex gap-3">
+              <span
+                className={cx(
+                  'mt-1 h-1.5 w-1.5 shrink-0 rounded-full',
+                  row.status === 'pass' && 'bg-risk-low',
+                  row.status === 'blocked' && 'bg-risk-urgent',
+                  row.status === 'na' && 'bg-ink-faint',
+                )}
+                aria-hidden
+              />
+              <div>
+                <p className={cx('text-[14px] font-medium', scoreColor[row.status])}>{row.label}</p>
+                <p className="mt-0.5 max-w-reading text-[13px] leading-relaxed text-ink-muted">
+                  {row.detail}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* ------------------------------------------------ AI confidence & grounding */}
+      {(draft?.matched_condition || mlHypothesis) && (
+        <section className="border-b border-rule px-8 py-6">
+          <SectionTitle note="Explainability">AI confidence & grounding</SectionTitle>
+
+          {draft?.matched_condition && !mlHypothesis && (
+            <p className="mt-3 text-[14px] text-risk-low">
+              Direct formulary match
+              {typeof topMatchScore === 'number' && ` · confidence ${(topMatchScore * 100).toFixed(0)}%`}
+            </p>
+          )}
+          {draft?.matched_condition && mlHypothesis && (
+            <p className="mt-3 text-[14px] text-risk-low">
+              Formulary match, corroborated by ML classifier
+              {typeof topMatchScore === 'number' && ` · confidence ${(topMatchScore * 100).toFixed(0)}%`}
+              {mlHypothesis.condition && ` — classifier agreed on ${mlHypothesis.condition}`}
+            </p>
+          )}
+          {!draft?.matched_condition && mlHypothesis && (
+            <p className="mt-3 text-[14px] text-risk-uncertain">
+              No confident formulary match. For reference only: a statistical classifier suggests{' '}
+              {mlHypothesis.condition}
+              {typeof mlHypothesis.confidence === 'number' &&
+                ` (${(mlHypothesis.confidence * 100).toFixed(0)}% model confidence)`}
+              . This did not inform any medication choice — clinician assessment required.
+            </p>
+          )}
+
+          {draft?.rationale && (
+            <p className="mt-3 max-w-reading text-[13px] leading-relaxed text-ink-muted">
+              {draft.rationale}
+            </p>
+          )}
+          {draft && draft.grounding_sources.length > 0 && (
+            <p className="mt-2 font-mono text-[11px] text-ink-faint">
+              {draft.grounding_sources.join(' · ')}
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ------------------------------------------------------------ case notes */}
       <section className="border-b border-rule px-8 py-6">
