@@ -622,7 +622,10 @@ function LanguageChooser({
 
         <div className="mt-8">
           <h2 className="label-meta">Choose your language</h2>
-          <div className="mt-4 grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-3">
+          {/* 2 and 4 columns both divide the eight languages evenly. At three
+              the last row left an empty cell showing the hairline background,
+              which read as a broken tile rather than deliberate space. */}
+          <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-rule bg-rule sm:grid-cols-4">
             {languages.map((lang) => (
               <button
                 key={lang.code}
@@ -936,12 +939,21 @@ function HandsFreeModeView({
                  onToggleListening();
                }
             }}
+            // The three risk colours are reserved (see globals.css) — they
+            // mean LOW_RISK / UNCERTAIN / URGENT and nothing else. Driving
+            // this control with risk-urgent for "listening" and an off-token
+            // amber for "speaking" put two risk-looking signals on screen
+            // that carried no clinical meaning, with the amber landing a
+            // shade away from --risk-uncertain. The states are distinguished
+            // by weight within the accent ramp instead: solid ink while
+            // capturing, soft accent while the assistant talks, solid accent
+            // at rest.
             className={cx(
               "flex items-center justify-center rounded-full w-24 h-24 sm:w-32 sm:h-32 transition-all duration-300 shadow-xl border-4",
-              listening 
-                ? "bg-risk-urgent border-risk-urgent text-white animate-pulse shadow-risk-urgent/40 scale-110" 
+              listening
+                ? "bg-ink border-ink text-white animate-pulse scale-110"
                 : speaking
-                ? "bg-amber-500 border-amber-500 text-white animate-pulse scale-105 shadow-amber-500/40"
+                ? "bg-accent-soft border-accent text-accent animate-pulse scale-105"
                 : "bg-accent border-accent text-white hover:scale-105 hover:shadow-accent/40"
             )}
             aria-label={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Start speaking'}
@@ -949,14 +961,14 @@ function HandsFreeModeView({
              {listening ? <MicActiveIcon className="w-10 h-10 sm:w-12 sm:h-12" /> : <MicIcon className="w-10 h-10 sm:w-12 sm:h-12" />}
           </button>
         ) : (
-          <p className="text-ink-muted text-sm border border-rule px-4 py-2 bg-surface">Microphone not supported on this device.</p>
+          <p className="card px-4 py-2 text-sm text-ink-muted">Microphone not supported on this device.</p>
         )}
         
         <div className="flex flex-col items-center gap-2 h-10 mt-4">
           {listening ? (
-             <p className="text-risk-urgent font-semibold text-lg animate-pulse uppercase tracking-wider">Listening...</p>
+             <p className="text-ink font-semibold text-lg animate-pulse uppercase tracking-wider">Listening…</p>
           ) : speaking ? (
-             <p className="text-amber-600 font-semibold text-lg animate-pulse uppercase tracking-wider">Assistant speaking (Tap to interrupt)</p>
+             <p className="text-accent font-semibold text-lg animate-pulse uppercase tracking-wider">Assistant speaking (tap to interrupt)</p>
           ) : sending ? (
              <p className="text-accent font-semibold text-lg uppercase tracking-wider">Assistant is thinking...</p>
           ) : (
@@ -1382,7 +1394,7 @@ function PrescriptionView({
 
         <div>
           <h2 className="label-meta">Show in</h2>
-        <div className="mt-2 flex flex-wrap gap-px border border-rule bg-rule">
+        <div className="mt-2 flex flex-wrap gap-px overflow-hidden rounded-2xl border border-rule bg-rule">
           {languages.map((lang) => (
             <button
               key={lang.code}
@@ -1522,45 +1534,62 @@ function AuthPhase({
   error: string;
 }) {
   return (
-    <div className="flex min-h-screen flex-col bg-paper px-5 py-16 items-center justify-center">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-paper px-5 py-16">
       <div className="w-full max-w-md">
-        <h1 className="text-display font-semibold text-ink mb-2">Welcome</h1>
-        <p className="text-body text-ink-muted mb-8">
-          Please enter your details to create a profile and save your consultations.
+        <div className="card-raised px-7 py-9 sm:px-9">
+          <span className="eyebrow">Multilingual clinical intake</span>
+          <h1 className="mt-3 text-[1.75rem] font-semibold leading-tight tracking-[-0.022em] text-ink">
+            Welcome
+          </h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">
+            Enter your details to create a profile, so your consultations are saved
+            and a doctor can see your history.
+          </p>
+
+          <form onSubmit={onSubmit} className="mt-8 space-y-5">
+            <label className="block">
+              <span className="eyebrow">Name</span>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => onNameChange(e.target.value)}
+                className="field mt-2"
+                placeholder="e.g. John Doe"
+                autoComplete="name"
+              />
+            </label>
+
+            <label className="block">
+              <span className="eyebrow">Age</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={age}
+                onChange={(e) => onAgeChange(e.target.value)}
+                className="field mt-2"
+                placeholder="e.g. 35"
+              />
+            </label>
+
+            {/* Semantic risk token rather than a raw Tailwind red: this
+                interface reserves colour for meaning, and an ad-hoc red here
+                would sit a shade away from every other error on screen. */}
+            {error && (
+              <p role="alert" className="text-[13px] leading-relaxed text-risk-urgent">
+                {error}
+              </p>
+            )}
+
+            <button type="submit" disabled={loading} className="btn-primary w-full">
+              {loading ? 'Continuing…' : 'Continue'}
+            </button>
+          </form>
+        </div>
+
+        <p className="mt-6 px-2 text-[12px] leading-relaxed text-ink-faint">
+          This service does not diagnose and does not replace a doctor. In a medical
+          emergency, contact your local emergency services.
         </p>
-        
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-ink mb-1">Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => onNameChange(e.target.value)}
-              className="w-full rounded border border-rule bg-surface px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
-              placeholder="e.g. John Doe"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-ink mb-1">Age</label>
-            <input
-              type="number"
-              value={age}
-              onChange={(e) => onAgeChange(e.target.value)}
-              className="w-full rounded border border-rule bg-surface px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
-              placeholder="e.g. 35"
-            />
-          </div>
-          
-          {error && <div className="text-red-500 text-sm">{error}</div>}
-          
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded bg-ink px-4 py-2.5 text-center font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {loading ? 'Continuing...' : 'Continue'}
-          </button>
-        </form>
       </div>
     </div>
   );
@@ -1593,47 +1622,62 @@ function DashboardPhase({
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-5 pt-8">
-        <div className="mb-10">
-          <button
-            onClick={onStart}
-            className="w-full rounded-lg bg-ink py-4 text-center text-lg font-medium text-paper shadow-sm transition-opacity hover:opacity-90 active:opacity-100"
-          >
-            Start New Consultation
+      <main className="mx-auto max-w-2xl px-5 pt-10">
+        <div className="card-raised px-7 py-8">
+          <span className="eyebrow">New visit</span>
+          <h2 className="mt-3 text-[1.35rem] font-semibold leading-tight tracking-[-0.02em] text-ink">
+            Tell us how you are feeling today
+          </h2>
+          <p className="mt-2 text-[14px] leading-relaxed text-ink-muted">
+            Speak or type in any of eight languages. A doctor reviews every case.
+          </p>
+          <button onClick={onStart} className="btn-primary mt-6 w-full">
+            Start new consultation
           </button>
         </div>
 
-        <SectionTitle>Past Consultations</SectionTitle>
-        {history.length === 0 ? (
-          <p className="mt-4 text-ink-muted">No past consultations found.</p>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {history.map((item) => (
-              <div key={item.case_id} className="rounded-lg border border-rule bg-surface p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-medium text-ink line-clamp-1">{item.chief_complaint || 'No complaint specified'}</h3>
-                    <p className="mt-1 text-sm text-ink-muted">
-                      {new Date(item.timestamp).toLocaleDateString()} at {new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </p>
+        <div className="mt-12">
+          <span className="eyebrow">Past consultations</span>
+          {history.length === 0 ? (
+            <div className="card-quiet mt-4 px-6 py-10 text-center">
+              <p className="text-[14px] text-ink-muted">No past consultations yet.</p>
+              <p className="mt-1 text-[13px] text-ink-faint">
+                Once a doctor reviews a visit, it will appear here.
+              </p>
+            </div>
+          ) : (
+            <ul className="mt-4 space-y-3">
+              {history.map((item) => (
+                <li key={item.case_id} className="card px-5 py-4 transition-colors hover:bg-surface-sunken">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="line-clamp-1 font-medium text-ink">
+                        {item.chief_complaint || 'No complaint specified'}
+                      </h3>
+                      <p className="mt-1 text-[13px] text-ink-muted">
+                        {new Date(item.timestamp).toLocaleDateString()} at{' '}
+                        {new Date(item.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
+                    </div>
+                    <RiskBadge risk={item.triage_status} size="sm" />
                   </div>
-                  <RiskBadge risk={item.triage_status} size="sm" />
-                </div>
-                
-                {item.has_prescription && item.prescription_id && (
-                  <div className="mt-4">
+
+                  {item.has_prescription && item.prescription_id && (
                     <button
                       onClick={() => onViewPrescription(item.prescription_id!)}
-                      className="text-sm font-medium text-accent hover:underline"
+                      className="btn-secondary btn-sm mt-4"
                     >
-                      View Prescription
+                      View prescription
                     </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </main>
     </div>
   );

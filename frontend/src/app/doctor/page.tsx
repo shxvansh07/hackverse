@@ -280,7 +280,15 @@ export default function DoctorDashboard() {
               <h2 className="label-meta">Queue</h2>
               <span className="text-[12px] text-ink-faint">{cases.length}</span>
             </div>
-            <div className="mt-3 flex gap-px bg-rule">
+            {/* Segmented control. A dashboard filter is a set of mutually
+                exclusive choices, so it stays one connected group rather than
+                four loose pills — role="tablist" is deliberately avoided
+                since these filter a list rather than switch panels. */}
+            <div
+              role="group"
+              aria-label="Filter queue by risk"
+              className="mt-3 flex rounded-full border border-rule bg-surface-sunken p-1"
+            >
               {[
                 { value: '', label: 'All' },
                 { value: 'URGENT', label: 'Urgent' },
@@ -290,11 +298,12 @@ export default function DoctorDashboard() {
                 <button
                   key={option.value}
                   onClick={() => setRiskFilter(option.value)}
+                  aria-pressed={riskFilter === option.value}
                   className={cx(
-                    'flex-1 px-2 py-1.5 text-[12px] transition-colors',
+                    'flex-1 cursor-pointer rounded-full px-2 py-1.5 text-[12px] font-medium transition-colors',
                     riskFilter === option.value
                       ? 'bg-ink text-white'
-                      : 'bg-surface text-ink-muted hover:bg-surface-sunken',
+                      : 'text-ink-muted hover:text-ink',
                   )}
                 >
                   {option.label}
@@ -321,12 +330,21 @@ export default function DoctorDashboard() {
                 <li key={item.case_id}>
                   <button
                     onClick={() => openCase(item.case_id)}
+                    // The selected row carries a solid accent spine so the
+                    // eye can find its place after glancing at the detail
+                    // pane. URGENT keeps its own red spine and outranks the
+                    // selection marker — which case is dangerous matters more
+                    // than which case is open.
                     className={cx(
-                      'w-full border-b border-rule px-5 py-4 text-left transition-colors',
+                      'w-full cursor-pointer border-b border-l-2 border-rule px-5 py-4 text-left transition-colors',
+                      item.triage_status === 'URGENT'
+                        ? 'border-l-risk-urgent'
+                        : selectedId === item.case_id
+                        ? 'border-l-accent'
+                        : 'border-l-transparent',
                       selectedId === item.case_id
                         ? 'bg-surface-sunken'
                         : 'hover:bg-surface-sunken/60',
-                      item.triage_status === 'URGENT' && 'border-l-2 border-l-risk-urgent',
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -605,7 +623,7 @@ function CaseReview({
             </p>
           )}
 
-          <div className="mt-4 divide-y divide-rule border border-rule">
+          <div className="card mt-4 divide-y divide-rule overflow-hidden">
             {detail.patient_history.recent_cases.map((visit) => (
               <button
                 key={visit.case_id}
@@ -944,7 +962,7 @@ function CaseReview({
         <SectionTitle note="Manual">Referral & in-person appointment</SectionTitle>
 
         {referral && (
-          <div className="mt-4 border border-rule bg-surface px-4 py-3">
+          <div className="card mt-4 px-4 py-3">
             <p className="label-meta">Specialist referral issued</p>
             <p className="mt-1 text-[14px] text-ink">
               {referral.specialty}
@@ -954,7 +972,7 @@ function CaseReview({
         )}
 
         {appointment && (
-          <div className="mt-4 border border-rule bg-surface px-4 py-3">
+          <div className="card mt-4 px-4 py-3">
             <p className="label-meta">Appointment on record</p>
             <p className="mt-1 text-[14px] text-ink">
               {appointment.type} · {appointment.slot_time} · {appointment.clinic_location}
@@ -962,7 +980,7 @@ function CaseReview({
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between border border-rule bg-surface px-4 py-3">
+        <div className="card mt-4 flex items-center justify-between px-4 py-3">
           <div>
             <p className="label-meta">Face-to-face consultation</p>
             <p className="mt-1 text-[13px] text-ink-muted">

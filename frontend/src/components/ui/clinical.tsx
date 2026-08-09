@@ -33,8 +33,8 @@ export function RiskBadge({ risk, size = 'md' }: { risk: RiskState; size?: 'sm' 
   return (
     <span
       className={cx(
-        'inline-flex items-center gap-1.5 border font-medium uppercase tracking-[0.1em]',
-        size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-[11px]',
+        'inline-flex items-center gap-1.5 rounded-full border font-semibold uppercase tracking-[0.1em]',
+        size === 'sm' ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1 text-[11px]',
         style.className,
       )}
     >
@@ -69,7 +69,7 @@ export function ReviewBadge({ status }: { status: ReviewStatus }) {
   return (
     <span
       className={cx(
-        'inline-flex border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.1em]',
+        'inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]',
         emphasised
           ? 'border-risk-low/30 bg-risk-low-soft text-risk-low'
           : 'border-rule bg-surface-sunken text-ink-muted',
@@ -153,7 +153,7 @@ export function StatusRail({ current }: { current: PatientStatus }) {
 export function AiDraftBanner({ blocked = false }: { blocked?: boolean }) {
   if (blocked) {
     return (
-      <div className="border border-risk-urgent/30 bg-risk-urgent-soft px-4 py-3">
+      <div className="rounded-2xl border border-risk-urgent/30 bg-risk-urgent-soft px-4 py-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-risk-urgent">
           No AI draft generated
         </p>
@@ -166,7 +166,7 @@ export function AiDraftBanner({ blocked = false }: { blocked?: boolean }) {
   }
 
   return (
-    <div className="border border-draft/30 bg-draft-soft px-4 py-3">
+    <div className="rounded-2xl border border-draft/30 bg-draft-soft px-4 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-draft">
         AI-generated draft — requires doctor approval
       </p>
@@ -231,7 +231,7 @@ export function ErrorNotice({
   return (
     <div
       role="alert"
-      className="flex items-start justify-between gap-4 border border-risk-urgent/30 bg-risk-urgent-soft px-4 py-3"
+      className="flex items-start justify-between gap-4 rounded-2xl border border-risk-urgent/30 bg-risk-urgent-soft px-4 py-3"
     >
       <p className="text-[13px] leading-relaxed text-risk-urgent">{message}</p>
       <div className="flex items-center gap-3 shrink-0">
@@ -246,10 +246,15 @@ export function ErrorNotice({
         {onClose && (
           <button
             onClick={onClose}
-            className="text-[13px] font-medium text-risk-urgent hover:text-ink transition-colors"
-            title="Dismiss error"
+            aria-label="Dismiss error"
+            className="-m-1.5 rounded-full p-1.5 text-risk-urgent transition-colors hover:bg-risk-urgent/10"
           >
-            ✕
+            {/* SVG rather than a "✕" character: screen readers announce that
+                glyph inconsistently, and it does not inherit stroke weight
+                from the surrounding type. */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         )}
       </div>

@@ -110,23 +110,48 @@
     @apply text-[11px] font-medium uppercase tracking-[0.12em] text-ink-faint;
   }
 
+  /* Section eyebrow: the small caps line that introduces a block of content
+     and gives every screen the same opening beat. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-faint;
+  }
+
+  /* Section heading, one step below the page title. */
+  .section-title {
+    @apply text-[1.5rem] font-semibold leading-tight tracking-[-0.02em] text-ink;
+  }
+
   .rule {
     @apply border-t border-rule;
   }
 
+  /* Panels. `card` is the resting surface; `card-raised` lifts a panel that
+     the eye should land on first. The shadow is deliberately near-invisible
+     — on a clinical screen it separates surfaces without becoming decoration
+     that competes with the risk colours. */
   .card {
-    @apply border border-rule bg-surface;
+    @apply rounded-2xl border border-rule bg-surface;
+  }
+
+  .card-raised {
+    @apply card shadow-[0_1px_2px_rgba(16,24,40,.04),0_12px_32px_-12px_rgba(16,24,40,.12)];
+  }
+
+  .card-quiet {
+    @apply rounded-2xl border border-rule bg-surface-sunken;
   }
 
   .field {
-    @apply w-full border border-rule bg-surface px-3 py-2 text-[15px]
-           text-ink placeholder:text-ink-faint
-           focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent;
+    @apply w-full rounded-xl border border-rule bg-surface px-3.5 py-2.5 text-[15px]
+           text-ink placeholder:text-ink-faint transition-colors
+           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20;
   }
 
+  /* Pill buttons, matching the landing page. min-h-[44px] is the touch
+     target floor, not a look — anything smaller is a miss on a phone. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 border px-4 py-2
-           text-sm font-medium transition-colors
+    @apply inline-flex min-h-[44px] cursor-pointer items-center justify-center gap-2
+           rounded-full border px-5 py-2.5 text-sm font-medium transition-colors
            disabled:cursor-not-allowed disabled:opacity-40;
   }
 
@@ -140,6 +165,12 @@
 
   .btn-danger {
     @apply btn border-risk-urgent bg-surface text-risk-urgent hover:bg-risk-urgent-soft;
+  }
+
+  /* Compact variant for toolbars and row actions, where a 44px pill would
+     dominate. Still 36px, so still comfortably tappable. */
+  .btn-sm {
+    @apply min-h-[36px] px-3.5 py-1.5 text-[13px];
   }
 }
 
