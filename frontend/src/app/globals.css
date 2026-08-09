@@ -169,6 +169,26 @@
     animation: rise 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
+  /* Landing-page scroll reveal. Driven by a view timeline, so it costs no
+     JavaScript and tracks scroll position rather than firing once on mount.
+     Gated behind @supports and prefers-reduced-motion: where either is
+     missing the element simply renders, so a section can never be left
+     invisible by an animation that did not run. */
+  @keyframes reveal-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .reveal {
+        animation: reveal-in linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 32%;
+      }
+    }
+  }
+
   @keyframes pulse-dot {
     0%, 100% { opacity: 0.25; }
     50%      { opacity: 1; }
