@@ -21,6 +21,7 @@ for _key in ("NVIDIA_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+from app.services import fallback_questions as fq  # noqa: E402
 from app.shared.database import db  # noqa: E402
 
 client = TestClient(app)
@@ -424,7 +425,15 @@ def test_conversation_alone_reaches_a_draft_with_zero_providers():
     assert case.allergies_confirmed is True
     assert case.history_confirmed is True
 
-    r4 = send(session_id, "no, that's everything")
+    # The interview walks a fixed question order (fallback_questions.
+    # QUESTION_ORDER) and only "anything_else" is allowed to close intake, so
+    # how many turns remain is a property of that list, not of this test.
+    # Keep answering until intake closes rather than hard-coding a turn count
+    # that any reordering of the question bank would silently break.
+    for _ in range(len(fq.QUESTION_ORDER) + 2):
+        r4 = send(session_id, "no, that's everything")
+        if r4["is_complete"]:
+            break
     assert r4["is_complete"] is True
     assert r4["triage_status"] == "LOW_RISK"
 
@@ -434,6 +443,25 @@ def test_conversation_alone_reaches_a_draft_with_zero_providers():
     prescription = db.get_prescription_for_case(case.case_id)
     assert prescription is not None
     assert prescription.medications
+
+
+def test_negated_severity_is_not_read_as_self_reported_severity():
+    """"not severe" must not be extracted as Severe.
+
+    Self-reported severity routes a case to UNCERTAIN on its own (safety
+    engine rule 6), so a substring match on "severe" inside "not severe"
+    would send every patient who denies severity to a clinician and starve
+    the low-risk path entirely.
+    """
+    from app.services import deterministic_extraction as de
+
+    assert de.extract("it is moderate, not severe").severity == "Moderate"
+    assert de.extract("no severe pain at all").severity is None
+
+    # The guard must not overshoot in the unsafe direction: a negation in a
+    # later clause, or a word merely containing "no", still leaves Severe.
+    assert de.extract("severe headache, no allergies").severity == "Severe"
+    assert de.extract("i know it is severe").severity == "Severe"
 
 
 def test_hinglish_symptom_message_is_extracted_without_any_llm():
@@ -584,7 +612,13 @@ def test_first_patient_answer_is_not_dropped():
     send(session_id, "i have a headache")
 
     case = db.get_case_by_session(session_id)
-    assert case.symptoms == ["i have a headache"]
+    # Deterministic extraction normalises the sentence down to the symptom
+    # itself ("headache", not "i have a headache") — the symptom list feeds
+    # red-flag matching and specialty routing, so it holds symptoms rather
+    # than raw utterances. What this test guards is that the answer survives
+    # at all, not the exact wording it is stored under.
+    assert case.symptoms
+    assert any("headache" in s for s in case.symptoms)
 
 
 def test_empty_message_rejected():

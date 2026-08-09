@@ -108,6 +108,33 @@ def _has_nearby_negation(text: str, keyword: str, window: int = 25) -> bool:
     return any(neg in span for neg in _NEGATION_TERMS)
 
 
+#: Whole-word negation match. Substring matching would let "no" fire inside
+#: "know", reading "i know it is severe" as a denial.
+_NEGATION_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(t) for t in _NEGATION_TERMS) + r")(?!\w)"
+)
+
+#: How far back to look for a negation attached to a severity word. Short on
+#: purpose: it should reach across "not quite" but not into a prior clause.
+_SEVERITY_NEGATION_WINDOW = 12
+
+
+def _severity_is_negated(text: str, keyword: str) -> bool:
+    """Whether a matched severity word is denied by a preceding negation.
+
+    Only text *before* the word is examined, unlike `_has_nearby_negation`.
+    A negation that follows belongs to a separate clause ("severe headache,
+    no allergies"), and treating it as a denial would quietly downgrade a
+    Severe case — the one direction this extractor must never fail in, since
+    self-reported severity is what routes a case to a clinician.
+    """
+    idx = text.find(keyword)
+    if idx == -1:
+        return False
+    preceding = text[max(0, idx - _SEVERITY_NEGATION_WINDOW) : idx]
+    return _NEGATION_RE.search(preceding) is not None
+
+
 def extract(patient_text: str) -> Optional[ExtractedClinicalInfo]:
     """Best-effort structured extraction from one patient message.
 
@@ -131,9 +158,13 @@ def extract(patient_text: str) -> Optional[ExtractedClinicalInfo]:
             duration = match.group(1).strip()
             break
 
+    # Most-severe-first, so "mild fever but severe headache" reports Severe.
+    # A negated term does not stop the walk: "moderate, not severe" has to
+    # fall through Severe and land on Moderate rather than reporting nothing.
     severity: Optional[str] = None
     for label, keywords in _SEVERITY_TERMS.items():
-        if any(kw in folded for kw in keywords):
+        matched = next((kw for kw in keywords if kw in folded), None)
+        if matched and not _severity_is_negated(folded, matched):
             severity = label
             break
 
