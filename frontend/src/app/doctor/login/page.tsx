@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, type DoctorDirectoryEntry } from '@/lib/api';
 import { ErrorNotice } from '@/components/ui/clinical';
 
 export default function DoctorLoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [doctors, setDoctors] = useState<DoctorDirectoryEntry[]>([]);
+  const [doctorId, setDoctorId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -17,12 +19,21 @@ export default function DoctorLoginPage() {
     if (api.isDoctorAuthenticated()) router.replace('/doctor');
   }, [router]);
 
+  useEffect(() => {
+    api.listDoctors().then((list) => {
+      setDoctors(list);
+      if (list.length > 0) setDoctorId(list[0].doctor_id);
+    }).catch(() => {
+      // Optional — the account still works with the default identity.
+    });
+  }, []);
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await api.doctorLogin(username, password);
+      await api.doctorLogin(username, password, doctorId || undefined);
       router.replace('/doctor');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Sign in failed.');
@@ -63,6 +74,23 @@ export default function DoctorLoginPage() {
               className="field mt-1.5"
             />
           </label>
+
+          {doctors.length > 0 && (
+            <label className="block">
+              <span className="label-meta">Signing in as</span>
+              <select
+                value={doctorId}
+                onChange={(e) => setDoctorId(e.target.value)}
+                className="field mt-1.5"
+              >
+                {doctors.map((d) => (
+                  <option key={d.doctor_id} value={d.doctor_id}>
+                    {d.name} · {d.years_experience} yrs · {d.specialty}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {error && <ErrorNotice message={error} />}
 

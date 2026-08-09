@@ -8,10 +8,17 @@ services; this module only reads them back into one shape.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
+from app.rag.vector_store import VectorStore
+from app.shared.auth import get_doctor_profile
 from app.shared.database import db
-from app.shared.models import CaseRecord, TriageCase
+from app.shared.models import CaseRecord, PrescriptionStatus, SimilarCase, TriageCase
+
+#: Picked empirically against this demo's case volume/style, the same way
+#: rag/engine.py's MIN_DRAFT_CONFIDENCE was — would need re-tuning if either
+#: changes materially.
+_SIMILAR_CASE_MIN_SCORE = 0.1
 
 
 class RecordService:
@@ -65,3 +72,52 @@ class RecordService:
             lines.append(f"{date}: {complaint} — {outcome}.")
 
         return " ".join(lines)
+
+    @staticmethod
+    def find_similar_cases(case: TriageCase, limit: int = 3) -> List[SimilarCase]:
+        """De-identified peer cases with a similar presentation, across ALL
+        patients — decision support, not continuity of care (that's
+        build_history_digest, scoped to one patient). Only ever clinical
+        content and doctor attribution; patient_id/name/phone are never read
+        here, so there is nothing identifying to leak by construction.
+
+        Purely advisory: the caller must never fold this into this patient's
+        own drafting query — see CaseService._generate_draft.
+        """
+        query_text = " ".join([*case.symptoms, *case.associated_symptoms, case.chief_complaint])
+        if not query_text.strip():
+            return []
+
+        store = VectorStore()
+        for other in db.cases.values():
+            if other.patient_id == case.patient_id or other.case_id == case.case_id:
+                continue
+            prescription = db.get_prescription_for_case(other.case_id)
+            if not prescription or not prescription.is_final:
+                continue
+            text = " ".join([*other.symptoms, *other.associated_symptoms, other.chief_complaint])
+            if not text.strip():
+                continue
+            store.add(other.case_id, text, {"case": other, "prescription": prescription})
+
+        hits = store.search(query_text, top_k=limit, min_score=_SIMILAR_CASE_MIN_SCORE)
+
+        results: List[SimilarCase] = []
+        for hit in hits:
+            other = hit.metadata["case"]
+            prescription = hit.metadata["prescription"]
+            doctor_profile = get_doctor_profile(prescription.doctor_id) if prescription.doctor_id else None
+            results.append(
+                SimilarCase(
+                    similarity_score=round(hit.score, 3),
+                    chief_complaint=other.chief_complaint or (other.symptoms[0] if other.symptoms else ""),
+                    diagnosis=prescription.matched_condition or prescription.icd10_title or "Unspecified",
+                    medications=[m.name for m in prescription.medications],
+                    doctor_name=prescription.doctor_name or "Unknown",
+                    doctor_years_experience=doctor_profile["years_experience"] if doctor_profile else None,
+                    was_modified_from_ai_draft=prescription.status == PrescriptionStatus.MODIFIED,
+                    doctor_notes=prescription.doctor_notes,
+                    approved_at=prescription.approved_at,
+                )
+            )
+        return results

@@ -496,6 +496,10 @@ class CreateCaseRequest(BaseModel):
 class DoctorLoginRequest(BaseModel):
     username: str
     password: str
+    #: Optional. Selects which seeded doctor identity to sign in as (see
+    #: app.shared.auth._DOCTOR_DIRECTORY). Omitted, behaviour is unchanged
+    #: from before this field existed — the single env-configured identity.
+    doctor_id: Optional[str] = None
 
 
 class DoctorLoginResponse(BaseModel):
@@ -503,6 +507,32 @@ class DoctorLoginResponse(BaseModel):
     doctor_id: str
     doctor_name: str
     expires_at: str
+    years_experience: Optional[int] = None
+
+
+class DoctorDirectoryEntry(BaseModel):
+    doctor_id: str
+    name: str
+    years_experience: int
+    specialty: str
+
+
+class SimilarCase(BaseModel):
+    """A de-identified peer case surfaced as decision support: what a similar
+    presentation was diagnosed as and treated with, and by whom — professional
+    attribution, never patient identity. No patient_id, name, phone, age or
+    any other field that could identify the patient it came from is ever
+    included here, by construction (see RecordService.find_similar_cases)."""
+
+    similarity_score: float
+    chief_complaint: str
+    diagnosis: str
+    medications: List[str]
+    doctor_name: str
+    doctor_years_experience: Optional[int] = None
+    was_modified_from_ai_draft: bool
+    doctor_notes: Optional[str] = None
+    approved_at: Optional[str] = None
 
 
 class BookAppointmentRequest(BaseModel):

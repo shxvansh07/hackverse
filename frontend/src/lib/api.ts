@@ -249,6 +249,28 @@ export interface PatientHistoryItem {
   has_consultation: boolean;
 }
 
+export interface DoctorDirectoryEntry {
+  doctor_id: string;
+  name: string;
+  years_experience: number;
+  specialty: string;
+}
+
+/** A de-identified peer case surfaced as decision support — clinical content
+ *  and doctor attribution only, never patient identity. See backend
+ *  RecordService.find_similar_cases. */
+export interface SimilarCase {
+  similarity_score: number;
+  chief_complaint: string;
+  diagnosis: string;
+  medications: string[];
+  doctor_name: string;
+  doctor_years_experience: number | null;
+  was_modified_from_ai_draft: boolean;
+  doctor_notes: string | null;
+  approved_at: string | null;
+}
+
 export interface PatientSession {
   session_id: string;
   patient_id: string;
@@ -523,12 +545,13 @@ export const api = {
 
   // ----------------------------------------------------------------- doctor
 
-  async doctorLogin(username: string, password: string) {
+  async doctorLogin(username: string, password: string, doctorId?: string) {
     const data = await request<{
       token: string; doctor_id: string; doctor_name: string; expires_at: string;
+      years_experience: number | null;
     }>('/api/auth/doctor/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, doctor_id: doctorId }),
     });
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(TOKEN_KEY, data.token);
@@ -536,6 +559,8 @@ export const api = {
     }
     return data;
   },
+
+  listDoctors: () => request<DoctorDirectoryEntry[]>('/api/auth/doctors'),
 
   doctorLogout() {
     if (typeof window === 'undefined') return;

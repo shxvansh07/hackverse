@@ -16,7 +16,13 @@ from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
 from app.services.record_service import RecordService
 from app.services.triage_service import TriageService
-from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
+from app.shared.auth import (
+    AccountLockedError,
+    authenticate,
+    list_doctor_directory,
+    require_doctor,
+    resolve_token,
+)
 from app.shared.database import db
 from app.shared.models import (
     AddCaseNoteRequest,
@@ -26,6 +32,7 @@ from app.shared.models import (
     DecisionType,
     DoctorDecisionRequest,
     DoctorDecisionResponse,
+    DoctorDirectoryEntry,
     DoctorLoginRequest,
     DoctorLoginResponse,
     LiveConsultation,
@@ -43,10 +50,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["doctor"])
 
 
+@router.get("/api/auth/doctors", response_model=List[DoctorDirectoryEntry])
+def get_doctor_directory():
+    """Public — lists display identities only, never credentials, so the
+    login page can offer a "signing in as" choice without hardcoding a
+    second copy of the seeded directory."""
+    return list_doctor_directory()
+
+
 @router.post("/api/auth/doctor/login", response_model=DoctorLoginResponse)
 def doctor_login(payload: DoctorLoginRequest):
     try:
-        record = authenticate(payload.username, payload.password)
+        record = authenticate(payload.username, payload.password, payload.doctor_id)
     except AccountLockedError as exc:
         minutes = max(1, (exc.retry_after_seconds + 59) // 60)
         raise HTTPException(

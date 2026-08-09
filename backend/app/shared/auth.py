@@ -17,14 +17,14 @@ import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Header, HTTPException, status
 
 _TOKEN_TTL_HOURS = 12
 
-#: token -> {doctor_id, doctor_name, expires_at}
-_ACTIVE_TOKENS: Dict[str, Dict[str, str]] = {}
+#: token -> {doctor_id, doctor_name, years_experience, expires_at}
+_ACTIVE_TOKENS: Dict[str, Dict[str, Any]] = {}
 
 #: Brute-force protection on login. Keyed by the attempted username rather
 #: than an IP address — the router has no request context to hand this
@@ -58,6 +58,28 @@ def _credentials() -> tuple[str, str]:
     )
 
 
+#: Seeded doctor identities for the demo — same shared password gates all of
+#: them (this is still the single-account auth described above, just with a
+#: choice of *display* identity), so a reviewer can show a similar past case
+#: attributed to a named, differently-experienced doctor rather than always
+#: the one hardcoded DOCTOR_NAME. Real deployment needs real per-doctor
+#: accounts; this is not that.
+_DOCTOR_DIRECTORY: Dict[str, Dict[str, object]] = {
+    "DR-101": {"name": "Dr. Sharma, MD", "years_experience": 14, "specialty": "General Medicine"},
+    "DR-102": {"name": "Dr. Iyer, MD", "years_experience": 2, "specialty": "General Medicine"},
+    "DR-103": {"name": "Dr. Fernandes, MD", "years_experience": 7, "specialty": "Internal Medicine"},
+}
+
+
+def list_doctor_directory() -> List[Dict[str, object]]:
+    return [{"doctor_id": doctor_id, **profile} for doctor_id, profile in _DOCTOR_DIRECTORY.items()]
+
+
+def get_doctor_profile(doctor_id: str) -> Optional[Dict[str, object]]:
+    profile = _DOCTOR_DIRECTORY.get(doctor_id)
+    return {"doctor_id": doctor_id, **profile} if profile else None
+
+
 def _lockout_remaining_seconds(key: str) -> int:
     now = time.time()
     attempts = [t for t in _FAILED_ATTEMPTS.get(key, []) if now - t < _LOCKOUT_SECONDS]
@@ -71,7 +93,9 @@ def _record_failure(key: str) -> None:
     _FAILED_ATTEMPTS.setdefault(key, []).append(time.time())
 
 
-def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
+def authenticate(
+    username: str, password: str, doctor_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     lockout_key = (username or "").strip().lower() or "unknown"
     retry_after = _lockout_remaining_seconds(lockout_key)
     if retry_after > 0:
@@ -89,9 +113,14 @@ def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     _FAILED_ATTEMPTS.pop(lockout_key, None)
     token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=_TOKEN_TTL_HOURS)).isoformat()
+
+    # A directory selection overrides the env default identity; omitted or
+    # unrecognised, behaviour is exactly what it was before doctor_id existed.
+    selected = get_doctor_profile(doctor_id) if doctor_id else None
     record = {
-        "doctor_id": os.getenv("DOCTOR_ID", "DR-101"),
-        "doctor_name": os.getenv("DOCTOR_NAME", "Dr. Sharma, MD"),
+        "doctor_id": selected["doctor_id"] if selected else os.getenv("DOCTOR_ID", "DR-101"),
+        "doctor_name": selected["name"] if selected else os.getenv("DOCTOR_NAME", "Dr. Sharma, MD"),
+        "years_experience": selected["years_experience"] if selected else None,
         "expires_at": expires_at,
         "token": token,
     }
@@ -99,7 +128,7 @@ def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     return record
 
 
-def resolve_token(token: str) -> Optional[Dict[str, str]]:
+def resolve_token(token: str) -> Optional[Dict[str, Any]]:
     record = _ACTIVE_TOKENS.get(token)
     if not record:
         return None
@@ -109,7 +138,7 @@ def resolve_token(token: str) -> Optional[Dict[str, str]]:
     return record
 
 
-async def require_doctor(authorization: Optional[str] = Header(default=None)) -> Dict[str, str]:
+async def require_doctor(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """FastAPI dependency guarding every doctor endpoint."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
