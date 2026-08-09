@@ -179,6 +179,7 @@ class ClinicalRAGEngine:
         associated_symptoms: Sequence[str] = (),
         summary: str = "",
         rationale: Optional[str] = None,
+        history_context: str = "",
     ) -> tuple[Prescription, Dict[str, Any]]:
         """Assemble a draft from the top-matching formulary protocol.
 
@@ -186,11 +187,17 @@ class ClinicalRAGEngine:
         provenance shown to the doctor so they can see what the draft was
         based on.
 
+        `history_context` — a returning patient's prior-visit digest (see
+        RecordService.build_history_digest) — only ever widens the retrieval
+        query so a recurring condition is more likely to match the right
+        protocol. It can never introduce a medication of its own; that still
+        comes exclusively from the curated formulary/ML fallback below.
+
         The returned prescription is always status=DRAFT / is_ai_draft=True.
         Only a doctor decision changes that.
         """
         self.load()
-        query = self.build_query(symptoms, associated_symptoms, summary)
+        query = self.build_query(symptoms, associated_symptoms, summary, history_context)
         retrieval = self.retrieve(query)
 
         medications: List[Medication] = []
@@ -296,6 +303,8 @@ class ClinicalRAGEngine:
             "matched_entries": matched_entries,
             "ml_hypothesis": ml_hypothesis,
         }
+        if history_context:
+            grounding["history_context"] = history_context
         return prescription, grounding
 
     def health(self) -> Dict[str, Any]:

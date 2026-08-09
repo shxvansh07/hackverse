@@ -304,6 +304,7 @@ The medications were chosen by a rules engine from a curated formulary. You are 
 RULES
 - Ground every statement in the retrieved guidance passages provided. Cite their ids.
 - Note explicitly any caution relevant to this patient's stated history or allergies.
+- If "prior_history" in the structured case names a relevant past visit, you may note the continuity ("consistent with a similar presentation on <date>") — but this is still never grounds to choose or change a medication; the formulary selection is already fixed.
 - Never assert a diagnosis. Say "presentation consistent with" rather than "the patient has".
 - 40 to 80 words.
 
