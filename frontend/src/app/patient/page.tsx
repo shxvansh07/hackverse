@@ -187,6 +187,20 @@ export default function PatientPage() {
     setPhase('auth');
   };
 
+  // The only way back to the dashboard from language/conversation/waiting/
+  // prescription — without this, a patient could only see an updated
+  // history list (e.g. a visit they just finished) via a full page reload.
+  // The in-progress case itself is already saved server-side on every
+  // message, so leaving it here loses no data.
+  const goToDashboard = useCallback(() => {
+    stopSpeaking();
+    speechRef.current?.stop();
+    setListening(false);
+    setSpeaking(false);
+    setPhase('dashboard');
+    if (patientProfile) loadHistory(patientProfile.patient_id);
+  }, [patientProfile]);
+
   /* --------------------------------------------------------- waiting poll */
 
   useEffect(() => {
@@ -486,9 +500,20 @@ export default function PatientPage() {
     <div className="min-h-screen bg-paper print:min-h-0 print:bg-white">
       <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 py-3">
-          <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
-            Clinical Assistant
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
+              Clinical Assistant
+            </Link>
+            {patientProfile && (
+              <button
+                type="button"
+                onClick={goToDashboard}
+                className="text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
+              >
+                My dashboard
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             {risk !== 'UNCERTAIN' && <RiskBadge risk={risk} size="sm" />}
             <span className="label-meta">{language?.native_name}</span>
