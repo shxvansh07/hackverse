@@ -98,6 +98,13 @@ class IBMBobProvider(OpenAICompatibleProvider):
     base_url = "https://api.ibm.com/v1" # or OpenAI compatible endpoint if available
 
 
+class GrokProvider(OpenAICompatibleProvider):
+    """xAI Grok — official OpenAI-compatible endpoint (api.x.ai)."""
+
+    name = "grok"
+    base_url = "https://api.x.ai/v1"
+
+
 class GeminiProvider(LLMProvider):
     """Google Gemini via generateContent.
 

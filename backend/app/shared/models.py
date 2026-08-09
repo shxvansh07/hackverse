@@ -353,6 +353,23 @@ class TriageCase(BaseModel):
     #: by the safety engine, which treats *_confirmed as settled either way.
     carried_forward_from_previous_visit: bool = False
 
+    #: True exactly when the AI's last turn was the closing question ("is
+    #: there anything else..."). This is explicit state the code sets
+    #: itself — never inferred by re-matching the AI's last message text —
+    #: because an LLM-authored question never matches the fixed question
+    #: bank verbatim, which made intake completion nearly unreachable
+    #: through a working LLM. See TriageService.process_message.
+    awaiting_closing_question: bool = False
+
+    #: One deterministic (not LLM-generated) sentence summarising this
+    #: patient's prior visits, set once at case creation from
+    #: database.get_cases_by_patient. Passed into the conversation prompt as
+    #: informational context only — same "hint, never fact" framing as
+    #: possible_red_flags — so the AI can ask more relevant follow-ups
+    #: without the safety engine ever depending on it. Empty for a
+    #: first-time or non-phone-linked patient.
+    prior_visit_note: str = ""
+
     # --- safety ----------------------------------------------------------
     red_flags: List[str] = Field(default_factory=list)
     missing_information: List[str] = Field(default_factory=list)

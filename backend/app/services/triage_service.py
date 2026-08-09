@@ -131,6 +131,21 @@ class TriageService:
         # past narrative as a fact stated this visit.
         prior_cases = db.get_cases_by_patient(patient_id) if patient_id else []
         if prior_cases:
+            # Deterministic (not LLM-generated) one-line context for the
+            # conversation prompt — see TriageCase.prior_visit_note. Built
+            # once here rather than fetched fresh each turn, since the set
+            # of prior visits is fixed for the lifetime of this case.
+            visit_descriptions = [
+                c.chief_complaint or (c.symptoms[0] if c.symptoms else "an unspecified complaint")
+                for c in prior_cases[:3]
+            ]
+            case.prior_visit_note = (
+                f"Seen {len(prior_cases)} time(s) before, most recently for: "
+                + "; ".join(visit_descriptions)
+                + ". Context only — do not assume today's complaint is the same "
+                "or related unless the patient says so."
+            )
+
             most_recent = prior_cases[0]
             carried: List[str] = []
             if most_recent.allergies_confirmed:
@@ -379,26 +394,56 @@ class TriageService:
         # A "no" mid-interview only answers whatever factual question was
         # just asked (see apply_negative_confirmation) — it must not also end
         # the whole conversation. Completion requires the *closing* question
-        # specifically (fallback_questions.QUESTION_ORDER always asks it
-        # last), so the patient always gets asked "anything else, or should I
-        # send this to your doctor?" before handoff, rather than the
-        # interview ending abruptly on an early "no allergies". Covered by
-        # test_intake_completes_with_zero_llm_providers.
+        # specifically, so the patient always gets asked "anything else, or
+        # should I send this to your doctor?" before handoff, rather than the
+        # interview ending abruptly on an early "no allergies".
         #
-        # Deliberately not also gated on `blocking` (unfilled required
-        # fields): if a required field genuinely never got answered, the
-        # safety engine already routes that case to UNCERTAIN rather than
-        # LOW_RISK on its own (see safety/engine.py), so it still reaches a
-        # doctor rather than auto-drafting. Requiring it here too would let a
-        # single stuck field loop the closing question forever instead of
-        # ending the conversation.
-        awaiting_closing_question = awaiting_field == "anything_else"
-        intake_complete = denies_more and awaiting_closing_question
+        # Whether this turn IS the closing question is tracked as explicit
+        # state (case.awaiting_closing_question), set only by this method,
+        # never inferred by re-matching the AI's last message text against
+        # the fixed question bank. That matching approach (the previous
+        # design) only succeeds when the reply is the exact canned string —
+        # an LLM freely phrasing its own questions never produces that
+        # string, which made completion reachable only by accident (when the
+        # LLM happened to repeat itself and the code fell back to canned
+        # text). The model also has its own opinion about when a
+        # conversation "sounds" finished (see _CONVERSATION_SYSTEM's
+        # constraints in ai/prompts.py) — that opinion is never authoritative
+        # here, same rule as every other safety-relevant decision in this
+        # module.
+        if case.awaiting_closing_question:
+            intake_complete = denies_more
+            if not intake_complete:
+                # Patient added something instead of declining — already
+                # captured in step 2/3 above. Drop back to normal questioning
+                # rather than treating a non-answer as "done".
+                case.awaiting_closing_question = False
+        elif len([m for m in case.transcript if m.sender == "ai"]) > len(fq.QUESTION_ORDER):
+            # We've now asked as many questions as the fixed interview has
+            # categories for (fallback_questions.QUESTION_ORDER) — the same
+            # cadence the deterministic bank always walked, kept identical
+            # here so an active LLM doesn't wrap up earlier just because the
+            # 3 safety-required fields (symptoms/duration/allergies) happen
+            # to resolve before associated_symptoms/medical_history/
+            # medications get asked about. Ask the closing question now —
+            # verbatim, never left to the model to phrase — so next turn's
+            # answer can be detected reliably regardless of who is driving
+            # the conversation.
+            reply = fq.anything_else_question(lang)
+            case.transcript.append(ChatMessage(sender="ai", text=reply))
+            case.awaiting_closing_question = True
+            session.status = PatientStatus.COLLECTING_INFORMATION
+            db.save_case(case)
+            db.save_session(session)
+            return {"reply": reply, "is_complete": False, "assessment": assessment, "urgent": False}
+        else:
+            intake_complete = False
 
         if intake_complete:
             reply = fq.handoff_message(lang)
             case.transcript.append(ChatMessage(sender="ai", text=reply))
             session.status = PatientStatus.ASSESSING
+            case.awaiting_closing_question = False
             # allergies_confirmed / history_confirmed are NOT set here. They
             # mean "the patient was asked and answered", and reaching the end
             # of the interview is not an answer. Marking them on handoff told
@@ -421,6 +466,7 @@ class TriageService:
             known_facts=case.known_facts(),
             missing_info=assessment.missing_information,
             previously_asked=previously_asked,
+            history_note=case.prior_visit_note,
         )
 
         if not reply:

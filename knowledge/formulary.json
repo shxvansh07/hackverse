@@ -546,8 +546,8 @@
       "condition": "Acute bacterial tonsillitis/pharyngitis",
       "presentation": "Severe throat pain with fever, visible white patches or pus on the tonsils, and painful swallowing, distinct from a routine viral sore throat.",
       "keywords": [
-        "white patches on tonsils", "pus on tonsils", "severe throat pain with fever",
-        "difficulty swallowing with fever and swollen glands", "swollen tonsils with fever"
+        "white patches on tonsils", "pus on tonsils", "severe throat pain when swallowing",
+        "painful swallowing and swollen glands", "swollen tonsils with pus"
       ],
       "medications": [
         {

@@ -21,6 +21,7 @@ from typing import List
 
 from app.ai.service import ai_service
 from app.safety import guards, specialty
+from app.services import deterministic_extraction
 from app.services.case_service import CaseService
 from app.services.triage_service import TriageService
 from app.shared.database import db
@@ -138,8 +139,38 @@ class ConsultationService:
         if extracted is not None:
             TriageService.merge_extraction(case, extracted)
 
+        # A live consultation has no equivalent of chat intake's fixed
+        # question order — whether duration/allergies ever get established
+        # depends entirely on the LLM extraction above succeeding, and
+        # unlike chat intake this path previously had no fallback: with no
+        # provider configured, or the call failing, nothing from the
+        # consultation was ever captured. A genuinely safe case would then
+        # compute UNCERTAIN and be blocked purely for missing data, not
+        # because it was risky. Back it with the same deterministic keyword
+        # extractor chat intake already falls back to — merge_extraction is
+        # additive, so this only ever fills gaps the LLM extraction (if any)
+        # left, never overwrites what it already established.
+        patient_lines = " ".join(
+            line[len("Patient: "):] for line in exchange_lines if line.startswith("Patient: ")
+        )
+        if patient_lines:
+            fallback_extracted = deterministic_extraction.extract(patient_lines)
+            if fallback_extracted is not None:
+                TriageService.merge_extraction(case, fallback_extracted)
+
         if case.prescription_id is not None:
             return
+
+        # A case pulled straight into a consultation (no prior chat intake)
+        # already has a summary_en — a generic "unspecified symptoms"
+        # placeholder written by finalise_assessment back when /api/cases
+        # first handed it off, before anything was known. That placeholder
+        # text is part of the RAG retrieval query (rag_engine.build_query),
+        # and its boilerplate phrasing ("Allergy status not established")
+        # can outscore the real symptoms just extracted above, silently
+        # dragging a confident match below the drafting threshold. Rebuild
+        # it now that the consultation has actually established facts.
+        case.summary_en = await TriageService.build_summary(case)
 
         hints = extracted.possible_red_flags if extracted is not None else ()
         assessment = TriageService.assess_case(case, latest_text="", llm_hints=hints)

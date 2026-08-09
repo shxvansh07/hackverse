@@ -23,6 +23,7 @@ from app.ai.base import LLMMessage, LLMProvider, LLMProviderError, LLMRequest, L
 from app.ai.providers import (
     DeepSeekProvider,
     GeminiProvider,
+    GrokProvider,
     GroqProvider,
     IBMBobProvider,
     NvidiaNIMProvider,
@@ -41,6 +42,7 @@ _REGISTRY: Dict[str, Tuple[type, str, str, str]] = {
     "nvidia": (NvidiaNIMProvider, "NVIDIA_API_KEY", "NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
     "gemini": (GeminiProvider, "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-1.5-flash"),
     "groq": (GroqProvider, "GROQ_API_KEY", "GROQ_MODEL", "llama-3.3-70b-versatile"),
+    "grok": (GrokProvider, "GROK_API_KEY", "GROK_MODEL", "grok-3-mini"),
     "openai": (OpenAIProvider, "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-4o-mini"),
     "deepseek": (DeepSeekProvider, "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "deepseek-chat"),
 }
@@ -191,11 +193,13 @@ class AIService:
         known_facts: Dict[str, Any],
         missing_info: List[str],
         previously_asked: List[str],
+        history_note: str = "",
     ) -> Optional[str]:
         """One conversational turn in the patient's language."""
         response = await self._complete(
             prompts.build_conversation_messages(
-                patient_message, history, lang, known_facts, missing_info, previously_asked
+                patient_message, history, lang, known_facts, missing_info, previously_asked,
+                history_note=history_note,
             ),
             temperature=0.3, max_tokens=220,
         )

@@ -607,6 +607,73 @@ def test_intake_completes_with_zero_llm_providers():
     assert case.history_confirmed
 
 
+def test_intake_completes_when_llm_phrases_its_own_free_text_questions(monkeypatch):
+    """Regression test for the exact reported bug: with a working LLM
+    actively generating its own free-text questions (never the literal
+    canned bank string), completion used to be detected by re-matching the
+    AI's last message text against the fixed question bank — a match that
+    only ever succeeds for that literal string, so completion was reachable
+    only by accident. It must now be tracked via explicit state
+    (TriageCase.awaiting_closing_question), independent of what the model
+    chooses to say on every other turn."""
+    from app.services import deterministic_extraction
+    from app.services import triage_service as ts_module
+
+    turn = {"n": 0}
+
+    async def fake_generate_reply(**kwargs):
+        turn["n"] += 1
+        return f"Thanks for sharing that. Turn {turn['n']}: tell me a bit more?"
+
+    async def fake_extract(patient_text, history):
+        # A real LLM understands content regardless of how the question was
+        # phrased; simulate that by delegating to the same keyword extractor
+        # the zero-provider path already uses and trusts.
+        return deterministic_extraction.extract(patient_text)
+
+    monkeypatch.setattr(ts_module.ai_service, "generate_reply", fake_generate_reply)
+    monkeypatch.setattr(ts_module.ai_service, "extract_clinical_info", fake_extract)
+
+    session_id = start_session("en")
+
+    r = send(session_id, "I have a severe headache")
+    assert r["is_complete"] is False
+    assert "Turn" in r["ai_response"], "the LLM's own free-text reply must be used, not the canned bank"
+
+    r = send(session_id, "it started 2 days ago")
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no allergies")
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no other conditions")
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no medications")
+    assert r["is_complete"] is False
+
+    # Every required field is settled and the fixed number of category
+    # questions has now been asked — the next reply must be the closing
+    # question, verbatim, regardless of what the mocked LLM would say.
+    r = send(session_id, "nothing else to add")
+    assert r["is_complete"] is False
+    assert "anything else" in r["ai_response"].lower(), (
+        "closing question must be asked deterministically once the interview "
+        "has run its course, not left to the model"
+    )
+
+    r = send(session_id, "no")
+    assert r["is_complete"] is True, (
+        "intake must complete once the closing question is answered negatively, "
+        "even though the LLM never phrased the canned bank text itself on any "
+        "other turn"
+    )
+
+    case = db.get_case(r["case_id"])
+    assert case.symptoms
+    assert case.duration
+
+
 def test_first_patient_answer_is_not_dropped():
     """The greeting implicitly asks about symptoms; a patient's very first
     reply must be captured, not silently discarded while the bot re-asks the
@@ -676,6 +743,54 @@ def test_urgent_case_never_receives_a_prescription_via_live_consultation():
     assert case.prescription_id is None
     assert db.get_prescription_for_case(case.case_id) is None
     assert case.review_status == "URGENT"
+
+
+def test_low_risk_case_receives_a_draft_via_live_consultation_alone():
+    """The success-path counterpart to the URGENT-blocked test above: a case
+    that reaches the doctor with no chat-established symptoms/duration/
+    allergies (a doctor pulling up a bare/incomplete case specifically to do
+    a live consultation) must still be able to receive a drafted
+    prescription once the consultation itself establishes everything
+    needed — regression test for the deterministic-extraction fallback in
+    ConsultationService._auto_draft. This file runs with zero LLM providers
+    configured, so this also exercises that fallback directly rather than a
+    mock of it."""
+    session_id = start_session("en")
+    case = db.get_case_by_session(session_id)
+    assert case.symptoms == []
+    assert case.duration == ""
+
+    client.post("/api/cases", json={"session_id": session_id})
+    headers = auth_headers()
+
+    consultation = client.post(
+        "/api/doctor/consultations/start", json={"case_id": case.case_id}, headers=headers,
+    ).json()
+    client.post(
+        f"/api/doctor/consultations/{consultation['consultation_id']}/turn",
+        json={
+            "speaker": "patient",
+            "text": "I have had a fever for 3 days, no allergies, no ongoing conditions",
+            "source_lang": "en", "target_lang": "en",
+        },
+        headers=headers,
+    )
+
+    resp = client.post(
+        f"/api/doctor/consultations/{consultation['consultation_id']}/end", headers=headers,
+    )
+    assert resp.status_code == 200
+
+    case = db.get_case(case.case_id)
+    assert case.symptoms, "symptoms should have been established from consultation dialogue alone"
+    assert case.duration, "duration should have been established from consultation dialogue alone"
+    assert case.allergies_confirmed
+    assert case.history_confirmed
+    assert case.triage_status == "LOW_RISK"
+    assert case.prescription_id is not None
+    prescription = db.get_prescription_for_case(case.case_id)
+    assert prescription is not None
+    assert prescription.medications, "a real LOW_RISK case must receive real medications, not an empty draft"
 
 
 # ---------------------------------------------------------------------------

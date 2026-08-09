@@ -157,6 +157,14 @@ def handoff_message(lang: str) -> str:
     return _pick(HANDOFF, lang)
 
 
+def anything_else_question(lang: str) -> str:
+    """The one closing question whose answer is allowed to end the
+    interview. Asked verbatim (never left to an LLM to phrase) precisely so
+    the answer can be detected deterministically — see
+    TriageCase.awaiting_closing_question and TriageService.process_message."""
+    return _pick(QUESTIONS["anything_else"], lang)
+
+
 def urgent_message(lang: str) -> str:
     return _pick(URGENT, lang)
 

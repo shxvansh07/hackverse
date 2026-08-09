@@ -26,13 +26,14 @@ ABSOLUTE RULES
 4. You only discuss health. For anything off-topic (maths, code, general knowledge, trivia), politely decline in one sentence and return to their medical symptoms.
 5. You never promise a prescription. A doctor reviews every case and decides.
 
-WRAP-UP & COMPLETION RULE
-- If the patient indicates they have nothing further to add (e.g., "no", "nope", "that's all", "that will be it", "thank you", "ok", "nothing else", "all good"), OR if you are informing them that their details are being sent to the doctor:
-- DO NOT ask another question! Wrap up warmly in one short sentence stating that you are sending their case to the doctor now.
+YOU NEVER DECIDE WHEN THE INTERVIEW ENDS
+- Deciding whether enough has been gathered, and telling the patient their case is going to the doctor, is handled entirely outside this conversation — by code, not by you. You have no way to know from inside a single turn whether this is the last question.
+- Never say anything implying the interview is ending, wrapping up, or being sent to the doctor — not "I'm sending this now", not "that's everything I need", not "let me pass this along". Even if the patient says "no", "that's all", "thank you", or otherwise sounds finished, that is their answer to your last question, nothing more — acknowledge it and continue exactly as any other turn.
+- Always end your turn with exactly one question, chosen from STILL MISSING below. If nothing is listed there, ask a natural, relevant follow-up instead of concluding anything.
 
 VOICE PHONE CALL STYLE
 - Conversational, warm, empathetic, and plain. Speak the way a caring nurse talks to a patient over a voice phone call.
-- Maximum two short sentences: first, briefly acknowledge what the patient said with genuine empathy (e.g. "I hear you", "Oh, I am sorry to hear that..."), then ask ONE simple, natural follow-up question UNLESS wrapping up.
+- Maximum two short sentences: first, briefly acknowledge what the patient said with genuine empathy (e.g. "I hear you", "Oh, I am sorry to hear that..."), then ask ONE simple, natural follow-up question.
 - Ask only for information listed as still missing. Never re-ask something already known.
 - Keep sentences short so that Text-to-Speech (TTS) speaks it smoothly and naturally aloud.
 - If the patient contradicts something they said earlier, ask them to clarify rather than picking one.
@@ -49,6 +50,7 @@ CLINICAL STATE SO FAR
 STILL MISSING (ask about the first of these that makes sense in context)
 {missing}
 
+{history_block}
 {asked_note}"""
 
 
@@ -59,6 +61,7 @@ def build_conversation_messages(
     known_facts: Dict[str, Any],
     missing_info: List[str],
     previously_asked: List[str],
+    history_note: str = "",
 ) -> List[Dict[str, str]]:
     """Assemble the message list for a conversational intake turn."""
     language = resolve(lang)
@@ -99,11 +102,24 @@ def build_conversation_messages(
             "YOU HAVE ALREADY ASKED THE FOLLOWING. Do not repeat them in any form:\n" + recent
         )
 
+    # Deterministic, not LLM-generated — see TriageCase.prior_visit_note.
+    # Same "hint, never fact" framing as possible_red_flags: it may shape
+    # which follow-up question feels natural to ask, but it is never
+    # evidence about today's complaint and must never be presented to the
+    # patient as something already known about their current visit.
+    history_block = ""
+    if history_note:
+        history_block = (
+            "PATIENT HISTORY (context only — never assume it applies to today's "
+            f"complaint unless the patient says so themselves)\n- {history_note}"
+        )
+
     system = _CONVERSATION_SYSTEM.format(
         language_name=language.english_name,
         script_note=script_note,
         known_state=known_state,
         missing=missing_text,
+        history_block=history_block,
         asked_note=asked_note,
     )
 

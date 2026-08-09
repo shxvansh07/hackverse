@@ -187,12 +187,18 @@ export default function ConsultationPage() {
     try {
       const ended = await api.endConsultation(consultation.consultation_id);
       setConsultation(ended);
+      // The draft-or-blocked outcome is only known after the backend
+      // processes the finished transcript, which happens inside
+      // endConsultation on the server. `detail` was fetched once at page
+      // load and is stale by now — refetch so the completed-state message
+      // below reflects what actually happened, not the pre-consultation state.
+      setDetail(await api.getCaseDetail(caseId));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not close the consultation.');
     } finally {
       setEnding(false);
     }
-  }, [consultation, stopListening]);
+  }, [consultation, stopListening, caseId]);
 
   if (!ready) return null;
 
@@ -333,11 +339,21 @@ export default function ConsultationPage() {
                 <p className="mt-3 max-w-reading text-[14px] leading-relaxed text-ink">
                   {consultation.report_en}
                 </p>
-                <p className="mt-4 max-w-reading text-[13px] leading-relaxed text-ink-muted">
-                  Saved to this case's record — never shown to the patient. A draft prescription
-                  has been generated from this consultation; review and release it from the case
-                  queue.
-                </p>
+                {detail?.prescription_draft ? (
+                  <p className="mt-4 max-w-reading text-[13px] leading-relaxed text-ink-muted">
+                    Saved to this case's record — never shown to the patient. A draft prescription
+                    has been generated from this consultation; review and release it from the case
+                    queue.
+                  </p>
+                ) : (
+                  <p className="mt-4 max-w-reading text-[13px] leading-relaxed text-ink-muted">
+                    Saved to this case's record — never shown to the patient. No draft was
+                    generated
+                    {detail?.draft_block_reason ? ` (${detail.draft_block_reason.toLowerCase().replace(/_/g, ' ')})` : ''}
+                    . You can still write a prescription directly from the case queue using
+                    &ldquo;Modify&rdquo;.
+                  </p>
+                )}
                 <Link href="/doctor" className="btn-secondary mt-3 inline-block">
                   Back to case queue
                 </Link>
