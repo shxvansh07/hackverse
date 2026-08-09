@@ -617,58 +617,84 @@ function CaseReview({
     <div className="pb-40">
       {/* ---------------------------------------------------- summary first */}
       <section className="border-b border-rule px-8 py-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="font-mono text-[12px] text-ink-faint">{kase.case_id}</span>
-          <span className="text-[12px] text-ink-faint">
-            {new Date(kase.created_at).toLocaleString()}
-          </span>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-rule bg-surface p-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <span className="text-[12px] font-semibold uppercase tracking-wider text-ink-faint">Patient Information</span>
-              <h3 className="text-xl font-bold text-ink">
+        <div className="card px-5 py-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="eyebrow">Patient</span>
+              <h3 className="mt-1 text-[1.35rem] font-semibold leading-tight tracking-[-0.02em] text-ink">
                 {(detail.patient_name && detail.patient_name !== 'Patient')
                   ? detail.patient_name
                   : (kase.patient_name && kase.patient_name !== 'Patient'
                     ? kase.patient_name
                     : (detail.patient_profile?.name || 'Patient'))}
               </h3>
-              <p className="text-sm text-ink-muted">
-                Patient ID: <span className="font-mono text-ink">{kase.patient_id}</span>
-                {' · Age: '}
+              <p className="mt-1.5 text-[13px] text-ink-muted">
                 <span className="font-medium text-ink">
-                  {kase.age || detail.patient_profile?.age || 'Not specified'}
+                  {kase.age || detail.patient_profile?.age || 'Age not specified'}
                 </span>
-                {' · Language: '}
-                <span className="font-medium text-ink uppercase">{kase.preferred_language}</span>
+                {' · '}
+                <span className="font-medium uppercase text-ink">{kase.preferred_language}</span>
+                {' · '}
+                <span className="font-mono text-ink">{kase.patient_id}</span>
+              </p>
+              {/* Case identity is provenance, not the headline — the doctor is
+                  looking at a person, and the id/timestamp only matter when
+                  cross-referencing. */}
+              <p className="mt-1 text-[12px] text-ink-faint">
+                <span className="font-mono">{kase.case_id}</span>
+                {' · '}
+                {new Date(kase.created_at).toLocaleString()}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <RiskBadge risk={kase.triage_status} />
               <ReviewBadge status={kase.review_status} />
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-rule pt-3 text-sm sm:grid-cols-4">
+          <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-rule pt-4 text-[13px] sm:grid-cols-4">
             <div>
-              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Medical History</span>
-              <span className="font-medium text-ink">{kase.medical_history.length > 0 ? kase.medical_history.join(', ') : 'None reported'}</span>
+              <dt className="eyebrow">Medical history</dt>
+              <dd className="mt-1 font-medium text-ink">
+                {kase.medical_history.length > 0 ? kase.medical_history.join(', ') : 'None reported'}
+              </dd>
             </div>
             <div>
-              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Known Allergies</span>
-              <span className="font-medium text-ink">{kase.allergies.length > 0 ? kase.allergies.join(', ') : (kase.allergies_confirmed ? 'No known allergies' : 'Not confirmed')}</span>
+              <dt className="eyebrow">Known allergies</dt>
+              {/* "Not confirmed" means the question was never answered, which
+                  is a different thing from "none" and is exactly the field
+                  that gates drafting. Rendering both in the same weight
+                  invited a doctor to read an unasked question as a cleared
+                  one, so the unconfirmed case is called out. */}
+              <dd
+                className={cx(
+                  'mt-1 font-medium',
+                  kase.allergies.length === 0 && !kase.allergies_confirmed
+                    ? 'text-risk-uncertain'
+                    : 'text-ink',
+                )}
+              >
+                {kase.allergies.length > 0
+                  ? kase.allergies.join(', ')
+                  : kase.allergies_confirmed
+                  ? 'None known'
+                  : 'Never asked'}
+              </dd>
             </div>
             <div>
-              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Current Medications</span>
-              <span className="font-medium text-ink">{kase.medications.length > 0 ? kase.medications.join(', ') : 'None'}</span>
+              <dt className="eyebrow">Current medications</dt>
+              <dd className="mt-1 font-medium text-ink">
+                {kase.medications.length > 0 ? kase.medications.join(', ') : 'None'}
+              </dd>
             </div>
             <div>
-              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Symptoms & Duration</span>
-              <span className="font-medium text-ink">{kase.symptoms.join(', ') || 'N/A'} {kase.duration ? `(${kase.duration})` : ''}</span>
+              <dt className="eyebrow">Symptoms &amp; duration</dt>
+              <dd className="mt-1 font-medium text-ink">
+                {kase.symptoms.join(', ') || 'Not recorded'}
+                {kase.duration ? ` (${kase.duration})` : ''}
+              </dd>
             </div>
-          </div>
+          </dl>
         </div>
 
         <h2 className="mt-6 text-title font-semibold text-ink">

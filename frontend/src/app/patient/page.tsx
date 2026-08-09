@@ -794,10 +794,17 @@ function TextModeView({
                      <button
                        type="button"
                        onClick={() => speak(m.text, language?.speech_tag)}
-                       className={cx("p-1 transition-colors rounded-full ml-auto", isAi ? "text-ink-faint hover:text-accent" : "text-white/70 hover:text-white")}
-                       title="Listen to this message"
+                       // Icon-only, so it needs a name of its own — `title`
+                       // alone is a tooltip, not an accessible name on every
+                       // screen reader. The negative margin keeps a 32px hit
+                       // area without changing the bubble's header height.
+                       aria-label="Read this message aloud"
+                       className={cx(
+                         '-m-1.5 ml-auto flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors',
+                         isAi ? 'text-ink-faint hover:bg-accent-soft hover:text-accent' : 'text-white/70 hover:text-white',
+                       )}
                      >
-                       <VolumeIcon className="w-3 h-3" />
+                       <VolumeIcon className="h-3.5 w-3.5" />
                      </button>
                    )}
                  </div>
@@ -864,18 +871,31 @@ function TextModeView({
                 disabled={sending || listening}
               />
               {speechSupported && (
-                <button 
+                <button
+                  type="button"
                   onClick={onToggleListening}
-                  className={cx("p-2 rounded-full transition-colors flex-shrink-0", listening ? "bg-risk-urgent text-white shadow-risk-urgent/40 shadow-lg animate-pulse" : "text-accent hover:bg-accent-soft")}
-                  title={listening ? "Stop listening" : "Start speaking"}
+                  aria-label={listening ? 'Stop recording' : 'Start speaking'}
+                  aria-pressed={listening}
+                  // Recording used bg-risk-urgent, which in this interface
+                  // means URGENT and nothing else (see globals.css). Solid ink
+                  // reads as "armed" without borrowing a clinical signal.
+                  className={cx(
+                    'flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors',
+                    listening
+                      ? 'bg-ink text-white animate-pulse'
+                      : 'text-accent hover:bg-accent-soft',
+                  )}
                 >
-                  {listening ? <MicActiveIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
+                  {listening ? <StopIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
                 </button>
               )}
-              <button 
+              <button
+                type="button"
                 onClick={() => { if (draft.trim()) onSubmit(draft); }}
                 disabled={sending || listening || !draft.trim()}
-                className="text-accent font-semibold disabled:opacity-50 px-2 flex-shrink-0 hover:text-accent-hover transition-colors"
+                // `accent-hover` was never a token, so the old hover was a
+                // no-op. Darkening the existing accent is the honest version.
+                className="flex h-11 shrink-0 cursor-pointer items-center rounded-full px-3 font-semibold text-accent transition-colors hover:bg-accent-soft disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 Send
               </button>
@@ -1000,7 +1020,7 @@ function HandsFreeModeView({
             )}
             aria-label={listening ? 'Stop listening' : speaking ? 'Stop speaking' : 'Start speaking'}
           >
-             {listening ? <MicActiveIcon className="w-10 h-10 sm:w-12 sm:h-12" /> : <MicIcon className="w-10 h-10 sm:w-12 sm:h-12" />}
+             {listening ? <StopIcon className="w-9 h-9 sm:w-11 sm:h-11" /> : <MicIcon className="w-10 h-10 sm:w-12 sm:h-12" />}
           </button>
         ) : (
           <p className="card px-4 py-2 text-sm text-ink-muted">Microphone not supported on this device.</p>
@@ -1045,21 +1065,39 @@ function VolumeIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * One mic glyph, drawn on a 24px grid with a single stroke weight.
+ *
+ * There used to be two — a "mic" and an "active mic" that differed only by a
+ * hair of geometry, which read as a rendering wobble rather than a state
+ * change. State is carried by the button itself (colour and pulse), and
+ * while recording the button shows StopIcon instead, because the useful
+ * question at that moment is "how do I stop?" and a second mic does not
+ * answer it.
+ */
 function MicIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9.25" y="2.75" width="5.5" height="10.5" rx="2.75" />
+      <path d="M5.75 11.25a6.25 6.25 0 0 0 12.5 0" />
+      <path d="M12 17.5v3.75" />
     </svg>
   );
 }
 
-function MicActiveIcon({ className }: { className?: string }) {
+function StopIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-      <path d="M5 10v2a7 7 0 0 0 14 0v-2"></path>
-      <line x1="12" y1="19" x2="12" y2="22"></line>
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="7" y="7" width="10" height="10" rx="2.5" />
     </svg>
   );
 }
