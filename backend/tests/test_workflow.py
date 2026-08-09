@@ -844,13 +844,14 @@ def test_only_handed_off_cases_appear_in_queue():
 # Live consultation safety gate
 # ---------------------------------------------------------------------------
 
-def test_urgent_case_never_receives_a_prescription_via_live_consultation():
-    """A doctor being physically present for a live consultation is
-    supervision of the conversation, not a substitute for the same drafting
-    gate the async chat-intake path always applies. A case already flagged
-    URGENT by the async intake must not silently receive a drafted
-    medication list just because it went through an in-person consultation
-    instead of the normal /api/triage/assess path."""
+def test_urgent_case_drafts_after_live_consultation_but_is_not_released():
+    """A completed live consultation means a doctor has already examined the
+    patient in person — that is the supervision an async URGENT/UNCERTAIN
+    gate exists to require, so it does not re-apply here. A case originally
+    flagged URGENT by the async intake DOES get a draft after its
+    consultation ends, ready for the doctor to review. What still must not
+    happen is the patient receiving anything before that doctor explicitly
+    approves or modifies it — that release gate is untouched."""
     session_id = start_session("en")
     send(session_id, "I have severe chest pain and cannot breathe")
     case = db.get_case_by_session(session_id)
@@ -867,9 +868,14 @@ def test_urgent_case_never_receives_a_prescription_via_live_consultation():
     assert resp.status_code == 200
 
     case = db.get_case(case.case_id)
-    assert case.prescription_id is None
-    assert db.get_prescription_for_case(case.case_id) is None
-    assert case.review_status == "URGENT"
+    assert case.prescription_id is not None
+    prescription = db.get_prescription_for_case(case.case_id)
+    assert prescription is not None
+    assert case.review_status == "NEW"
+
+    # Still not visible to the patient until a doctor decides.
+    status = client.get(f"/api/patient/status/{session_id}").json()
+    assert status["prescription_available"] is False
 
 
 def test_low_risk_case_receives_a_draft_via_live_consultation_alone():

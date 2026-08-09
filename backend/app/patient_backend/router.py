@@ -94,13 +94,14 @@ def get_patient_history(patient_id: str):
     patient = db.get_patient(patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient profile not found")
-        
+
+    # handed_off_only (the default) excludes a case still mid-conversation or
+    # abandoned — same principle db.get_cases_by_patient's other callers rely
+    # on: an incomplete chat is not a completed visit, and listing it as
+    # "history" would be misleading on the patient's own dashboard.
     history = []
-    # Find all cases for this patient
-    patient_cases = [c for c in db.cases.values() if c.patient_id == patient_id]
-    # Sort by descending creation date
-    patient_cases.sort(key=lambda c: c.created_at if hasattr(c, 'created_at') else c.case_id, reverse=True)
-    
+    patient_cases = db.get_cases_by_patient(patient_id)
+
     for case in patient_cases:
         item = {
             "case_id": case.case_id,

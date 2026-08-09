@@ -98,6 +98,7 @@ export default function PatientPage() {
   const [prescription, setPrescription] = useState<PresentedPrescription | null>(null);
   const [prescriptionLang, setPrescriptionLang] = useState<string>('en');
   const [loadingPrescription, setLoadingPrescription] = useState(false);
+  const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
   const [reviewRejected, setReviewRejected] = useState(false);
 
   const [recommendAppointment, setRecommendAppointment] = useState(false);
@@ -255,6 +256,12 @@ export default function PatientPage() {
     setLanguage(selectedLang);
     setError(null);
     setPhase('conversation');
+    // Cleared explicitly — otherwise a rejection or appointment from a prior
+    // visit under this same profile would still be showing (WaitingRoom
+    // checks `rejected` before anything else) once this new case reaches
+    // the waiting phase, even though it hasn't been near a doctor yet.
+    setReviewRejected(false);
+    setAppointment(null);
 
     try {
       const session = await api.startSession(
@@ -474,14 +481,21 @@ export default function PatientPage() {
       <DashboardPhase
         profile={patientProfile!}
         history={history}
+        loadingPrescription={loadingPrescription}
+        prescriptionError={prescriptionError}
         onStart={() => setPhase('language')}
         onLogout={handleLogout}
         onViewPrescription={(prescriptionId) => {
           setLoadingPrescription(true);
+          setPrescriptionError(null);
           api.getPrescription(prescriptionId, 'en').then((p) => {
             setPrescription(p);
             setPrescriptionLang('en');
             setPhase('prescription');
+          }).catch((err) => {
+            setPrescriptionError(
+              err instanceof ApiError ? err.message : 'Could not load the prescription.',
+            );
           }).finally(() => setLoadingPrescription(false));
         }}
       />
@@ -1613,12 +1627,16 @@ function AuthPhase({
 function DashboardPhase({
   profile,
   history,
+  loadingPrescription,
+  prescriptionError,
   onStart,
   onLogout,
   onViewPrescription,
 }: {
   profile: PatientProfile;
   history: PatientHistoryItem[];
+  loadingPrescription: boolean;
+  prescriptionError: string | null;
   onStart: () => void;
   onLogout: () => void;
   onViewPrescription: (id: string) => void;
@@ -1668,10 +1686,14 @@ function DashboardPhase({
                   <div className="mt-4">
                     <button
                       onClick={() => onViewPrescription(item.prescription_id!)}
-                      className="text-sm font-medium text-accent hover:underline"
+                      disabled={loadingPrescription}
+                      className="text-sm font-medium text-accent hover:underline disabled:opacity-50"
                     >
-                      View Prescription
+                      {loadingPrescription ? 'Loading…' : 'View Prescription'}
                     </button>
+                    {prescriptionError && (
+                      <p className="mt-2 text-sm text-risk-urgent">{prescriptionError}</p>
+                    )}
                   </div>
                 )}
               </div>

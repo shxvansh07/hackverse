@@ -538,6 +538,12 @@ function CaseReview({
       status: 'pass',
       detail: 'Medication drawn verbatim from the curated formulary, never model-generated.',
     });
+  } else if (detail.draft_blocked && detail.draft_block_reason === 'ALLERGY_CONFLICT') {
+    scorecardRows.push({
+      label: 'Formulary grounding',
+      status: 'blocked',
+      detail: 'A formulary match was found, but withheld before drafting — see the allergy conflict above.',
+    });
   } else if (mlHypothesis) {
     scorecardRows.push({
       label: 'Formulary grounding',
@@ -595,10 +601,7 @@ function CaseReview({
       <section className="border-b border-rule px-8 py-6">
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-mono text-[12px] text-ink-faint">{kase.case_id}</span>
-          <RiskBadge risk={kase.triage_status} />
-          <ReviewBadge status={kase.review_status} />
           <span className="text-[12px] text-ink-faint">
-            {kase.patient_id} · {kase.preferred_language.toUpperCase()} ·{' '}
             {new Date(kase.created_at).toLocaleString()}
           </span>
         </div>
