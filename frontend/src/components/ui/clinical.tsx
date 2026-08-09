@@ -56,10 +56,16 @@ const REVIEW_LABEL: Record<ReviewStatus, string> = {
   MODIFIED: 'Modified',
   REJECTED: 'Rejected',
   URGENT: 'Urgent',
+  REFERRED: 'Referred',
+  OFFLINE_SCHEDULED: 'In-person scheduled',
 };
 
 export function ReviewBadge({ status }: { status: ReviewStatus }) {
-  const emphasised = status === 'APPROVED' || status === 'MODIFIED';
+  const emphasised =
+    status === 'APPROVED' ||
+    status === 'MODIFIED' ||
+    status === 'REFERRED' ||
+    status === 'OFFLINE_SCHEDULED';
   return (
     <span
       className={cx(

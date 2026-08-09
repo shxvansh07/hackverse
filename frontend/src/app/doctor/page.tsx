@@ -6,8 +6,8 @@
  *
  * Information hierarchy is summary-first — the English clinical summary and
  * the safety signals sit above the fold; the transcript and grounding detail
- * are below. The four decision actions are pinned so they never require a
- * scroll to reach.
+ * are below. The decision actions are pinned so they never require a scroll
+ * to reach.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -31,6 +31,19 @@ import {
   Spinner,
   cx,
 } from '@/components/ui/clinical';
+
+const REFERRAL_SPECIALTIES = [
+  'Cardiology',
+  'ENT',
+  'Neurology',
+  'Orthopedics',
+  'Gastroenterology',
+  'Dermatology',
+  'General Surgery',
+  'Pulmonology',
+  'Psychiatry',
+  'Obstetrics & Gynecology',
+];
 
 export default function DoctorDashboard() {
   const router = useRouter();
@@ -179,7 +192,15 @@ export default function DoctorDashboard() {
   const submitDecision = useCallback(
     async (
       decision: DecisionType,
-      options: { notes?: string; medications?: Medication[]; instructions?: string } = {},
+      options: {
+        notes?: string;
+        medications?: Medication[];
+        instructions?: string;
+        referralSpecialty?: string;
+        referralNotes?: string;
+        offlineAppointmentTime?: string;
+        offlineClinicLocation?: string;
+      } = {},
     ) => {
       if (!selectedId) return;
       try {
@@ -187,6 +208,10 @@ export default function DoctorDashboard() {
           notes: options.notes,
           modifiedMedications: options.medications,
           modifiedInstructions: options.instructions,
+          referralSpecialty: options.referralSpecialty,
+          referralNotes: options.referralNotes,
+          offlineAppointmentTime: options.offlineAppointmentTime,
+          offlineClinicLocation: options.offlineClinicLocation,
         });
         setFlash(result.message);
         await Promise.all([loadQueue(), refreshDetail(selectedId)]);
@@ -370,16 +395,32 @@ function CaseReview({
   detail: CaseDetail;
   onDecide: (
     decision: DecisionType,
-    options?: { notes?: string; medications?: Medication[]; instructions?: string },
+    options?: {
+      notes?: string;
+      medications?: Medication[];
+      instructions?: string;
+      referralSpecialty?: string;
+      referralNotes?: string;
+      offlineAppointmentTime?: string;
+      offlineClinicLocation?: string;
+    },
   ) => Promise<void>;
 }) {
-  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding } = detail;
+  const router = useRouter();
+  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation } = detail;
 
   const [notes, setNotes] = useState('');
   const [editing, setEditing] = useState(false);
   const [medications, setMedications] = useState<Medication[]>(draft?.medications ?? []);
   const [instructions, setInstructions] = useState(draft?.instructions ?? '');
   const [busy, setBusy] = useState(false);
+
+  const [referralSpecialty, setReferralSpecialty] = useState(
+    kase.recommended_specialty || REFERRAL_SPECIALTIES[0],
+  );
+  const [referralNotes, setReferralNotes] = useState('');
+  const [offlineTime, setOfflineTime] = useState('');
+  const [offlineLocation, setOfflineLocation] = useState('Main Hospital OPD Clinic, Room 102');
 
   useEffect(() => {
     setMedications(draft?.medications ?? []);
@@ -388,10 +429,22 @@ function CaseReview({
     setNotes('');
   }, [draft?.prescription_id]);
 
+  // Mirrors the backend's Medication validation (min_length=1 after trim on
+  // name/dosage/frequency/duration) — catch a blank row here, before the
+  // API call, rather than only after a 422 comes back.
+  const medicationsInvalid =
+    medications.length === 0 ||
+    medications.some(
+      (m) =>
+        !m.name.trim() || !m.dosage.trim() || !m.frequency.trim() || !m.duration.trim(),
+    );
+
   const decided =
     kase.review_status === 'APPROVED' ||
     kase.review_status === 'MODIFIED' ||
-    kase.review_status === 'REJECTED';
+    kase.review_status === 'REJECTED' ||
+    kase.review_status === 'REFERRED' ||
+    kase.review_status === 'OFFLINE_SCHEDULED';
 
   const run = async (decision: DecisionType) => {
     setBusy(true);
@@ -399,6 +452,14 @@ function CaseReview({
       if (decision === 'MODIFY') {
         await onDecide('MODIFY', { notes, medications, instructions });
         setEditing(false);
+      } else if (decision === 'REFERRAL') {
+        await onDecide('REFERRAL', { notes, referralSpecialty, referralNotes });
+      } else if (decision === 'OFFLINE_APPOINTMENT') {
+        await onDecide('OFFLINE_APPOINTMENT', {
+          notes,
+          offlineAppointmentTime: offlineTime,
+          offlineClinicLocation: offlineLocation,
+        });
       } else {
         await onDecide(decision, { notes });
       }
@@ -431,6 +492,12 @@ function CaseReview({
         <p className="mt-4 max-w-reading text-body leading-relaxed text-ink">
           {kase.summary_en || 'No summary generated.'}
         </p>
+
+        {kase.recommended_specialty && (
+          <p className="mt-3 text-[13px] text-ink-muted">
+            Deterministic engine suggests: <span className="text-ink">{kase.recommended_specialty}</span>
+          </p>
+        )}
       </section>
 
       {/* ------------------------------------------------------ safety first */}
@@ -441,7 +508,7 @@ function CaseReview({
           </p>
           <p className="mt-1 max-w-reading text-[13px] leading-relaxed text-ink-muted">
             The safety layer detected a red flag and did not generate a draft. You can still
-            prescribe directly using Modify.
+            prescribe directly using Modify, or refer/schedule below.
           </p>
         </div>
       )}
@@ -650,6 +717,14 @@ function CaseReview({
               )}
             </ul>
 
+            {editing && medicationsInvalid && (
+              <p className="mt-3 text-[13px] text-risk-urgent">
+                {medications.length === 0
+                  ? 'Add at least one medication before releasing this prescription.'
+                  : 'Every medication needs a name, dosage, frequency and duration — a blank field will be rejected.'}
+              </p>
+            )}
+
             <div className="mt-4">
               <span className="label-meta">General instructions</span>
               {editing ? (
@@ -695,6 +770,113 @@ function CaseReview({
             Write a prescription
           </button>
         )}
+      </section>
+
+      {/* ------------------------------------------------- referral & offline */}
+      <section className="border-b border-rule px-8 py-6">
+        <SectionTitle note="Manual">Referral & in-person appointment</SectionTitle>
+
+        {referral && (
+          <div className="mt-4 border border-rule bg-surface px-4 py-3">
+            <p className="label-meta">Specialist referral issued</p>
+            <p className="mt-1 text-[14px] text-ink">
+              {referral.specialty}
+              {referral.referral_notes && ` — ${referral.referral_notes}`}
+            </p>
+          </div>
+        )}
+
+        {appointment && (
+          <div className="mt-4 border border-rule bg-surface px-4 py-3">
+            <p className="label-meta">Appointment on record</p>
+            <p className="mt-1 text-[14px] text-ink">
+              {appointment.type} · {appointment.slot_time} · {appointment.clinic_location}
+            </p>
+          </div>
+        )}
+
+        {appointment && (
+          <div className="mt-4 flex items-center justify-between border border-rule bg-surface px-4 py-3">
+            <div>
+              <p className="label-meta">Face-to-face consultation</p>
+              <p className="mt-1 text-[13px] text-ink-muted">
+                {consultation?.status === 'COMPLETED'
+                  ? 'Completed — report generated.'
+                  : consultation?.status === 'IN_PROGRESS'
+                    ? 'In progress — resume on the doctor\'s device.'
+                    : 'For when the patient is here in person: real-time interpreted, scribed, ends in a report.'}
+              </p>
+            </div>
+            <button
+              onClick={() => router.push(`/doctor/consultation/${kase.case_id}`)}
+              className="btn-secondary shrink-0"
+            >
+              {consultation?.status === 'IN_PROGRESS' ? 'Resume' : consultation?.status === 'COMPLETED' ? 'View' : 'Start consultation'}
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-6 md:grid-cols-2">
+          <div>
+            <h3 className="label-meta">Refer to specialist</h3>
+            <label className="mt-2 block">
+              <span className="label-meta">Specialty</span>
+              <select
+                value={referralSpecialty}
+                onChange={(e) => setReferralSpecialty(e.target.value)}
+                className="field mt-1"
+              >
+                {REFERRAL_SPECIALTIES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-2 block">
+              <span className="label-meta">Clinical reason</span>
+              <input
+                value={referralNotes}
+                onChange={(e) => setReferralNotes(e.target.value)}
+                placeholder="Optional"
+                className="field mt-1"
+              />
+            </label>
+            <button
+              onClick={() => run('REFERRAL')}
+              disabled={busy}
+              className="btn-secondary mt-3"
+            >
+              Issue referral
+            </button>
+          </div>
+
+          <div>
+            <h3 className="label-meta">Schedule in-person appointment</h3>
+            <label className="mt-2 block">
+              <span className="label-meta">Date & time</span>
+              <input
+                value={offlineTime}
+                onChange={(e) => setOfflineTime(e.target.value)}
+                placeholder="e.g. 2026-08-10 11:00 AM"
+                className="field mt-1"
+              />
+            </label>
+            <label className="mt-2 block">
+              <span className="label-meta">Clinic location</span>
+              <input
+                value={offlineLocation}
+                onChange={(e) => setOfflineLocation(e.target.value)}
+                className="field mt-1"
+              />
+            </label>
+            <button
+              onClick={() => run('OFFLINE_APPOINTMENT')}
+              disabled={busy}
+              className="btn-secondary mt-3"
+            >
+              Schedule appointment
+            </button>
+          </div>
+        </div>
       </section>
 
       {/* -------------------------------------------------------- transcript */}
@@ -752,7 +934,12 @@ function CaseReview({
                 </button>
                 <button
                   onClick={() => run('MODIFY')}
-                  disabled={busy || medications.length === 0}
+                  disabled={busy || medicationsInvalid}
+                  title={
+                    medicationsInvalid
+                      ? 'Every medication needs a name, dosage, frequency and duration before this can be released.'
+                      : undefined
+                  }
                   className="btn-primary"
                 >
                   Save & release

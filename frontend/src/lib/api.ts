@@ -17,7 +17,8 @@ export type RiskState = 'LOW_RISK' | 'UNCERTAIN' | 'URGENT';
 
 export type ReviewStatus =
   | 'NEW' | 'IN_REVIEW' | 'NEEDS_REVIEW'
-  | 'APPROVED' | 'MODIFIED' | 'REJECTED' | 'URGENT';
+  | 'APPROVED' | 'MODIFIED' | 'REJECTED' | 'URGENT'
+  | 'REFERRED' | 'OFFLINE_SCHEDULED';
 
 export type PatientStatus =
   | 'COLLECTING_INFORMATION' | 'ASSESSING' | 'WAITING_FOR_DOCTOR'
@@ -26,7 +27,12 @@ export type PatientStatus =
 export type PrescriptionStatus =
   | 'DRAFT' | 'APPROVED' | 'MODIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
 
-export type DecisionType = 'APPROVE' | 'MODIFY' | 'REJECT' | 'NEEDS_REVIEW';
+export type DecisionType =
+  | 'APPROVE' | 'MODIFY' | 'REJECT' | 'NEEDS_REVIEW'
+  | 'REFERRAL' | 'OFFLINE_APPOINTMENT';
+
+export type AppointmentType =
+  | 'OPTIONAL_CONSULT' | 'URGENT_EMERGENCY' | 'DOCTOR_SCHEDULED_OFFLINE' | 'SPECIALIST_CONSULT';
 
 export interface Language {
   code: string;
@@ -35,6 +41,17 @@ export interface Language {
   /** BCP-47 tag for the Web Speech API. */
   speech_tag: string;
   mvp: boolean;
+}
+
+/** Letterhead identity for the printable prescription. Display-only. */
+export interface ClinicInfo {
+  hospital_name: string;
+  hospital_address: string;
+  hospital_phone: string;
+  hospital_registration_no: string;
+  doctor_name: string;
+  doctor_qualification: string;
+  doctor_registration_no: string;
 }
 
 export interface Medication {
@@ -61,6 +78,60 @@ export interface SafetySignal {
   evaluated_at: string;
 }
 
+/** A doctor's manual referral to a specialist. Distinct from
+ *  TriageCase.recommended_specialty, which is the deterministic engine's
+ *  suggestion — this is the doctor's own decision. */
+export interface ReferralInfo {
+  specialty: string;
+  referral_notes: string;
+  doctor_name: string;
+  created_at: string;
+}
+
+/** A booked visit. Always the result of an explicit confirmation — a patient
+ *  clicking "confirm", or a doctor decision — never created automatically. */
+export interface Appointment {
+  appointment_id: string;
+  case_id: string;
+  patient_id: string;
+  doctor_id: string;
+  doctor_name: string;
+  type: AppointmentType;
+  slot_time: string;
+  clinic_location: string;
+  status: string;
+  notes: string;
+  specialty: string | null;
+  created_at: string;
+}
+
+/** One utterance in a live face-to-face consultation, kept both as said and
+ *  as translated so the transcript is legible in either language. */
+export interface ConsultationTurn {
+  speaker: 'doctor' | 'patient';
+  original_text: string;
+  original_lang: string;
+  translated_text: string;
+  translated_lang: string;
+  timestamp: string;
+}
+
+/** An in-person visit, real-time-interpreted on one shared device. */
+export interface LiveConsultation {
+  consultation_id: string;
+  case_id: string;
+  doctor_id: string;
+  doctor_name: string;
+  patient_lang: string;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  turns: ConsultationTurn[];
+  report_en: string | null;
+  report_translated: string | null;
+  report_lang: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
 export interface TriageCase {
   case_id: string;
   session_id: string;
@@ -81,10 +152,14 @@ export interface TriageCase {
   missing_information: string[];
   triage_status: RiskState;
   safety_signal: SafetySignal | null;
+  recommended_specialty: string | null;
   review_status: ReviewStatus;
   summary_en: string;
   transcript: ChatMessage[];
   prescription_id: string | null;
+  appointment_id: string | null;
+  referral: ReferralInfo | null;
+  consultation_id: string | null;
   grounding: Record<string, unknown>;
   handed_off: boolean;
   handed_off_at: string | null;
@@ -104,6 +179,7 @@ export interface Prescription {
   doctor_name: string | null;
   doctor_notes: string | null;
   approved_at: string | null;
+  referral: ReferralInfo | null;
   icd10_code: string;
   icd10_title: string;
   matched_condition: string;
@@ -163,6 +239,10 @@ export interface TriageResponse {
   missing_information: string[];
   red_flags: string[];
   urgent_guidance: string | null;
+  /** True for URGENT or UNCERTAIN — tells the UI to offer booking instead of
+   *  waiting for a prescription. Never implies anything is already booked. */
+  recommend_appointment: boolean;
+  recommended_specialty: string | null;
   clinical_state: TriageCase | null;
 }
 
@@ -175,6 +255,8 @@ export interface AssessResponse {
   draft_generated: boolean;
   draft_blocked_reason: string | null;
   patient_status: PatientStatus;
+  recommend_appointment: boolean;
+  recommended_specialty: string | null;
 }
 
 export interface PatientStatusResponse {
@@ -187,6 +269,12 @@ export interface PatientStatusResponse {
   prescription_id: string | null;
   rejected: boolean;
   message: string;
+  recommend_appointment: boolean;
+  recommended_specialty: string | null;
+  appointment: Appointment | null;
+  visit_report_available: boolean;
+  visit_report: string | null;
+  visit_report_lang: string | null;
 }
 
 export interface CaseDetail {
@@ -197,6 +285,9 @@ export interface CaseDetail {
   audit: AuditEvent[];
   draft_blocked: boolean;
   draft_block_reason: string | null;
+  appointment: Appointment | null;
+  referral: ReferralInfo | null;
+  consultation: LiveConsultation | null;
 }
 
 export interface AuditEvent {
@@ -289,6 +380,8 @@ export const api = {
   listLanguages: () =>
     request<{ languages: Language[] }>('/api/languages').then((r) => r.languages),
 
+  getClinicInfo: () => request<ClinicInfo>('/api/clinic-info'),
+
   startSession: (language: string, patientName = 'Patient') =>
     request<PatientSession>('/api/patient/session', {
       method: 'POST',
@@ -308,6 +401,9 @@ export const api = {
       case: TriageCase | null;
       triage_status: RiskState;
       missing_information: string[];
+      recommend_appointment: boolean;
+      recommended_specialty: string | null;
+      appointment: Appointment | null;
     }>(`/api/triage/${sessionId}`),
 
   assess: (sessionId: string) =>
@@ -328,6 +424,19 @@ export const api = {
   /** Returns 409 for anything not doctor-finalised — that is the safety gate. */
   getPrescription: (prescriptionId: string, lang = 'en') =>
     request<PresentedPrescription>(`/api/prescriptions/${prescriptionId}?lang=${lang}`),
+
+  /** Patient-confirmed booking. Never called automatically by the app —
+   *  even URGENT requires this explicit call. */
+  bookAppointment: (caseId: string, slotTime?: string, clinicLocation?: string, specialty?: string) =>
+    request<Appointment>('/api/appointments/book', {
+      method: 'POST',
+      body: JSON.stringify({
+        case_id: caseId,
+        slot_time: slotTime ?? null,
+        clinic_location: clinicLocation ?? null,
+        specialty: specialty ?? null,
+      }),
+    }),
 
   // ----------------------------------------------------------------- doctor
 
@@ -374,6 +483,10 @@ export const api = {
       notes?: string;
       modifiedMedications?: Medication[];
       modifiedInstructions?: string;
+      referralSpecialty?: string;
+      referralNotes?: string;
+      offlineAppointmentTime?: string;
+      offlineClinicLocation?: string;
     } = {},
   ) =>
     request<DecisionResponse>(
@@ -385,6 +498,10 @@ export const api = {
           notes: options.notes ?? null,
           modified_medications: options.modifiedMedications ?? null,
           modified_instructions: options.modifiedInstructions ?? null,
+          referral_specialty: options.referralSpecialty ?? null,
+          referral_notes: options.referralNotes ?? null,
+          offline_appointment_time: options.offlineAppointmentTime ?? null,
+          offline_clinic_location: options.offlineClinicLocation ?? null,
         }),
       },
       true,
@@ -397,6 +514,46 @@ export const api = {
     request<Prescription>(
       `/api/prescriptions/${prescriptionId}`,
       { method: 'PATCH', body: JSON.stringify(payload) },
+      true,
+    ),
+
+  // ---------------------------------------------------- live consultation
+
+  /** Doctor-driven: single shared device, so all four calls sit under the
+   *  doctor auth boundary even though the outcome (the report) reaches the
+   *  patient too, via patientStatus() above. */
+  startConsultation: (caseId: string) =>
+    request<LiveConsultation>(
+      '/api/doctor/consultations/start',
+      { method: 'POST', body: JSON.stringify({ case_id: caseId }) },
+      true,
+    ),
+
+  getConsultation: (consultationId: string) =>
+    request<LiveConsultation>(`/api/doctor/consultations/${consultationId}`, {}, true),
+
+  submitConsultationTurn: (
+    consultationId: string,
+    turn: { speaker: 'doctor' | 'patient'; text: string; sourceLang: string; targetLang: string },
+  ) =>
+    request<ConsultationTurn>(
+      `/api/doctor/consultations/${consultationId}/turn`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          speaker: turn.speaker,
+          text: turn.text,
+          source_lang: turn.sourceLang,
+          target_lang: turn.targetLang,
+        }),
+      },
+      true,
+    ),
+
+  endConsultation: (consultationId: string) =>
+    request<LiveConsultation>(
+      `/api/doctor/consultations/${consultationId}/end`,
+      { method: 'POST' },
       true,
     ),
 

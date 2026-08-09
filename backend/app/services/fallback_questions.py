@@ -169,25 +169,34 @@ def service_error_message(lang: str) -> str:
     return _pick(SERVICE_ERROR, lang)
 
 
-def next_question(lang: str, missing: List[str], already_asked: List[str]) -> str:
-    """Pick the next unanswered field's question, skipping ones already asked."""
-    code = resolve(lang).code
-    ordered = [
-        "symptoms", "duration", "associated_symptoms",
-        "allergies", "medical_history", "medications",
-    ]
+#: Fixed interview order. Deliberately not driven by `missing_information`
+#: (REQUIRED_FIELDS only tracks symptoms/duration/allergies, so a
+#: missing-driven walk would jump straight from symptoms to duration and
+#: skip "any other symptoms?" entirely) — every field here gets asked
+#: exactly once, in this order, so the interview feels like an actual
+#: history-taking conversation instead of racing to the minimum the safety
+#: engine requires. "anything_else" is always last: it is the only question
+#: whose answer is allowed to end the interview (see
+#: TriageService.process_message's intake_complete check).
+#:
+#: "symptoms" is deliberately NOT in this list. next_question() is only ever
+#: called after at least one patient message, so the greeting — which
+#: already asks "what is troubling you today?" — has always already covered
+#: it; including it here would ask the same thing a second time in
+#: different words right after the patient's first answer.
+QUESTION_ORDER: List[str] = [
+    "associated_symptoms", "duration",
+    "allergies", "medical_history", "medications",
+]
 
-    for field in ordered:
-        if field not in missing:
-            continue
+
+def next_question(lang: str, already_asked: List[str]) -> str:
+    """Pick the next unasked question in the fixed interview order."""
+    code = resolve(lang).code
+
+    for field in QUESTION_ORDER:
         question = QUESTIONS.get(field, {}).get(code)
         if question and question not in already_asked:
             return question
 
-    # Deliberately does not fall back to re-asking about a field outside
-    # `missing` — that field is either already known or was never required,
-    # and re-probing it would violate "never re-ask what we already know."
-    # If every still-missing field's question has already been asked verbatim
-    # (patient's answer did not parse), asking generically keeps the
-    # conversation moving without repeating a specific question.
     return QUESTIONS["anything_else"].get(code, QUESTIONS["anything_else"]["en"])

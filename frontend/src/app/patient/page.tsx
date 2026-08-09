@@ -9,6 +9,11 @@
  * or show medication before a doctor has finalised it. The waiting phase is
  * therefore explicit that a human is reviewing, and prescription content is
  * only ever fetched from the guarded endpoint after `prescription_available`.
+ *
+ * A third thing it must never do: book an appointment on the patient's
+ * behalf. recommend_appointment (URGENT or UNCERTAIN) only ever offers a
+ * button — booking happens through an explicit patient confirmation via
+ * api.bookAppointment, never automatically.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,7 +21,9 @@ import Link from 'next/link';
 import {
   ApiError,
   api,
+  type Appointment,
   type ChatMessage,
+  type ClinicInfo,
   type Language,
   type PatientStatus,
   type PresentedPrescription,
@@ -39,7 +46,7 @@ import {
   cx,
 } from '@/components/ui/clinical';
 
-type Phase = 'language' | 'conversation' | 'waiting' | 'prescription';
+type Phase = 'language' | 'conversation' | 'waiting' | 'prescription' | 'visit-report';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -70,6 +77,14 @@ export default function PatientPage() {
   const [loadingPrescription, setLoadingPrescription] = useState(false);
   const [reviewRejected, setReviewRejected] = useState(false);
 
+  const [recommendAppointment, setRecommendAppointment] = useState(false);
+  const [recommendedSpecialty, setRecommendedSpecialty] = useState<string | null>(null);
+  const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [bookingAppointment, setBookingAppointment] = useState(false);
+
+  const [visitReport, setVisitReport] = useState<string | null>(null);
+  const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
+
   const speechRef = useRef<SpeechInput | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -83,6 +98,10 @@ export default function PatientPage() {
       .listLanguages()
       .then(setLanguages)
       .catch(() => setError('Could not load languages. Is the clinical service running?'));
+    // Best-effort: only needed for the printable prescription's letterhead,
+    // not for anything else on this page — a failure here shouldn't block
+    // the actual clinical flow.
+    api.getClinicInfo().then(setClinicInfo).catch(() => {});
     speechRef.current = new SpeechInput();
     return () => {
       speechRef.current?.stop();
@@ -109,6 +128,18 @@ export default function PatientPage() {
         setPatientStatus(status.patient_status);
         setStatusMessage(status.message);
         setRisk(status.triage_status);
+        setRecommendAppointment(status.recommend_appointment);
+        setRecommendedSpecialty(status.recommended_specialty);
+        if (status.appointment) setAppointment(status.appointment);
+
+        // A completed in-person consultation is the most recent, most
+        // complete outcome available — it takes priority over the async
+        // prescription track, which a case may or may not also have.
+        if (status.visit_report_available && status.visit_report) {
+          setVisitReport(status.visit_report);
+          setPhase('visit-report');
+          return;
+        }
 
         if (status.rejected) {
           setReviewRejected(true);
@@ -186,6 +217,8 @@ export default function PatientPage() {
         setClinicalState(response.clinical_state);
         setPatientStatus(response.patient_status);
         setRisk(response.triage_status);
+        setRecommendAppointment(response.recommend_appointment);
+        setRecommendedSpecialty(response.recommended_specialty);
 
         if (response.urgent_guidance) {
           setUrgentGuidance(response.urgent_guidance);
@@ -220,6 +253,25 @@ export default function PatientPage() {
     },
     [sessionId, sending, voiceReplies, language],
   );
+
+  const confirmAppointment = useCallback(async () => {
+    if (!clinicalState || bookingAppointment) return;
+    setBookingAppointment(true);
+    setError(null);
+    try {
+      const booked = await api.bookAppointment(
+        clinicalState.case_id,
+        undefined,
+        undefined,
+        recommendedSpecialty ?? undefined,
+      );
+      setAppointment(booked);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not book the appointment.');
+    } finally {
+      setBookingAppointment(false);
+    }
+  }, [clinicalState, recommendedSpecialty, bookingAppointment]);
 
   const toggleListening = useCallback(() => {
     if (!language || !speechRef.current) return;
@@ -285,8 +337,8 @@ export default function PatientPage() {
   }
 
   return (
-    <div className="min-h-screen bg-paper">
-      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur">
+    <div className="min-h-screen bg-paper print:min-h-0 print:bg-white">
+      <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 py-3">
           <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
             Clinical Assistant
@@ -301,14 +353,13 @@ export default function PatientPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-5 pb-32 pt-6">
+      <main className="mx-auto max-w-2xl px-5 pb-32 pt-6 print:max-w-none print:p-0">
         {phase === 'conversation' && (
           <Conversation
             messages={messages}
             sending={sending}
             error={error}
             lastFailedMessage={lastFailedMessage}
-            clinicalState={clinicalState}
             language={language}
             onRetry={() => lastFailedMessage && submitMessage(lastFailedMessage)}
             transcriptEndRef={transcriptEndRef}
@@ -322,6 +373,11 @@ export default function PatientPage() {
             message={statusMessage}
             rejected={reviewRejected}
             loading={loadingPrescription}
+            recommendAppointment={recommendAppointment}
+            recommendedSpecialty={recommendedSpecialty}
+            appointment={appointment}
+            bookingAppointment={bookingAppointment}
+            onBookAppointment={confirmAppointment}
           />
         )}
 
@@ -332,7 +388,13 @@ export default function PatientPage() {
             activeLanguage={prescriptionLang}
             loading={loadingPrescription}
             onLanguageChange={changePrescriptionLanguage}
+            clinicInfo={clinicInfo}
+            patientId={clinicalState?.patient_id ?? null}
           />
+        )}
+
+        {phase === 'visit-report' && visitReport && (
+          <VisitReportView report={visitReport} language={language} />
         )}
       </main>
 
@@ -435,7 +497,6 @@ function Conversation({
   sending,
   error,
   lastFailedMessage,
-  clinicalState,
   language,
   onRetry,
   transcriptEndRef,
@@ -444,7 +505,6 @@ function Conversation({
   sending: boolean;
   error: string | null;
   lastFailedMessage: string | null;
-  clinicalState: TriageCase | null;
   language: Language | null;
   onRetry: () => void;
   transcriptEndRef: React.RefObject<HTMLDivElement>;
@@ -494,41 +554,6 @@ function Conversation({
       {error && (
         <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} />
       )}
-
-      {clinicalState && clinicalState.symptoms.length > 0 && (
-        <section className="border border-rule bg-surface px-4 py-4">
-          <h2 className="label-meta">Recorded so far</h2>
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
-            <SummaryPair label="Symptoms" value={clinicalState.symptoms.join(', ')} />
-            <SummaryPair label="Duration" value={clinicalState.duration} />
-            <SummaryPair label="Severity" value={clinicalState.severity} />
-            <SummaryPair
-              label="Allergies"
-              value={
-                clinicalState.allergies.length
-                  ? clinicalState.allergies.join(', ')
-                  : clinicalState.allergies_confirmed
-                    ? 'None reported'
-                    : ''
-              }
-            />
-          </dl>
-          <p className="mt-4 border-t border-rule pt-3 text-[12px] leading-relaxed text-ink-faint">
-            Only what you have told us is recorded. Nothing here is a diagnosis.
-          </p>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function SummaryPair({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="label-meta">{label}</dt>
-      <dd className={cx('mt-0.5', value ? 'text-ink' : 'text-ink-faint')}>
-        {value || 'Not yet known'}
-      </dd>
     </div>
   );
 }
@@ -638,18 +663,76 @@ function MicIcon() {
 
 /* ====================================================================== */
 
+function AppointmentAction({
+  tone,
+  appointment,
+  recommendedSpecialty,
+  bookingAppointment,
+  onBookAppointment,
+  bookLabel,
+  bookedLabel,
+}: {
+  tone: 'urgent' | 'uncertain';
+  appointment: Appointment | null;
+  recommendedSpecialty: string | null;
+  bookingAppointment: boolean;
+  onBookAppointment: () => void;
+  bookLabel: string;
+  bookedLabel: string;
+}) {
+  const border = tone === 'urgent' ? 'border-risk-urgent/30' : 'border-risk-uncertain/30';
+  const label = tone === 'urgent' ? 'text-risk-urgent' : 'text-risk-uncertain';
+
+  if (appointment) {
+    return (
+      <div className={cx('mt-5 border bg-surface px-4 py-3', border)}>
+        <p className={cx('label-meta', label)}>{bookedLabel}</p>
+        <p className="mt-1 text-[14px] text-ink">
+          {appointment.slot_time} · {appointment.clinic_location}
+        </p>
+        {appointment.specialty && (
+          <p className="mt-1 text-[13px] text-ink-muted">Specialist: {appointment.specialty}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5">
+      {recommendedSpecialty && (
+        <p className="mb-2 text-[13px] text-ink-muted">
+          Recommended specialist: {recommendedSpecialty}
+        </p>
+      )}
+      <button type="button" onClick={onBookAppointment} disabled={bookingAppointment} className="btn-primary">
+        {bookingAppointment ? 'Booking…' : bookLabel}
+      </button>
+    </div>
+  );
+}
+
 function WaitingRoom({
   urgent,
   urgentGuidance,
   message,
   rejected,
   loading,
+  recommendAppointment,
+  recommendedSpecialty,
+  appointment,
+  bookingAppointment,
+  onBookAppointment,
 }: {
   urgent: boolean;
   urgentGuidance: string | null;
   message: string;
   rejected: boolean;
   loading: boolean;
+  recommendAppointment: boolean;
+  recommendedSpecialty: string | null;
+  appointment: Appointment | null;
+  bookingAppointment: boolean;
+  onBookAppointment: () => void;
 }) {
   if (urgent) {
     return (
@@ -662,10 +745,46 @@ function WaitingRoom({
           {urgentGuidance ||
             'The symptoms you described need emergency medical care. Contact emergency services or go to your nearest emergency department now.'}
         </p>
+
+        <AppointmentAction
+          tone="urgent"
+          appointment={appointment}
+          recommendedSpecialty={recommendedSpecialty}
+          bookingAppointment={bookingAppointment}
+          onBookAppointment={onBookAppointment}
+          bookLabel="Confirm & book emergency appointment now"
+          bookedLabel="Emergency appointment confirmed"
+        />
+
         <p className="mt-5 border-t border-risk-urgent/20 pt-4 text-[13px] leading-relaxed text-ink-muted">
-          A doctor has been alerted to your case. No prescription will be issued through
-          this service for an emergency presentation — do not wait for one.
+          A doctor has been alerted to your case. Booking above does not replace calling
+          emergency services — do not wait for a prescription through this service.
         </p>
+      </div>
+    );
+  }
+
+  if (recommendAppointment) {
+    return (
+      <div className="animate-rise border-l-2 border-risk-uncertain bg-risk-uncertain-soft px-5 py-6">
+        <p className="label-meta text-risk-uncertain">In-person visit recommended</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">
+          Your symptoms need an in-person evaluation.
+        </h1>
+        <p className="mt-4 text-body leading-relaxed text-ink">
+          We are not able to draft a home prescription from the information gathered so far.
+          Please book an appointment so a doctor can examine you directly.
+        </p>
+
+        <AppointmentAction
+          tone="uncertain"
+          appointment={appointment}
+          recommendedSpecialty={recommendedSpecialty}
+          bookingAppointment={bookingAppointment}
+          onBookAppointment={onBookAppointment}
+          bookLabel="Book in-person appointment"
+          bookedLabel="Appointment booked"
+        />
       </div>
     );
   }
@@ -712,37 +831,215 @@ function WaitingRoom({
 
 /* ====================================================================== */
 
+function VisitReportView({ report, language }: { report: string; language: Language | null }) {
+  return (
+    <div className="animate-rise space-y-6">
+      <div>
+        <p className="label-meta text-risk-low">From your in-person visit</p>
+        <h1 className="mt-3 text-title font-semibold text-ink">Visit report</h1>
+      </div>
+      <p
+        className="max-w-reading whitespace-pre-wrap text-body leading-relaxed text-ink"
+        lang={language?.code}
+      >
+        {report}
+      </p>
+      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
+        This is a record of your consultation, not a prescription. If your doctor prescribed
+        anything during the visit, they will have given it to you directly.
+      </p>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+
+/**
+ * Standard prescription-pad layout for printing/PDF export. `hidden
+ * print:block` — invisible on screen, only enters the DOM's rendered layout
+ * when printing (see globals.css for the accompanying @page rule). Always
+ * English/canonical, regardless of the on-screen display language: this is
+ * the document a pharmacist reads, not a patient-facing translation.
+ *
+ * Deliberately plain black-on-white with rules instead of the app's colour
+ * system — background colours are not reliable in print output unless the
+ * user has "background graphics" enabled, so nothing here depends on one.
+ */
+function PrintablePrescription({
+  prescription,
+  clinicInfo,
+  patientId,
+}: {
+  prescription: PresentedPrescription;
+  clinicInfo: ClinicInfo | null;
+  patientId: string | null;
+}) {
+  const approvedAt = prescription.approved_at ? new Date(prescription.approved_at) : null;
+
+  return (
+    <div className="hidden print:block print:text-black">
+      <header className="border-b-2 border-black pb-3">
+        <h1 className="text-xl font-bold">
+          {clinicInfo?.hospital_name ?? 'Clinical Assistant General Hospital'}
+        </h1>
+        <p className="mt-1 text-[12px]">{clinicInfo?.hospital_address}</p>
+        <p className="text-[12px]">
+          {clinicInfo?.hospital_phone}
+          {clinicInfo?.hospital_registration_no &&
+            ` · Reg. No: ${clinicInfo.hospital_registration_no}`}
+        </p>
+      </header>
+
+      <div className="mt-4 flex justify-between text-[13px]">
+        <div>
+          <p>
+            <span className="font-semibold">Patient ID:</span> {patientId ?? '—'}
+          </p>
+          <p>
+            <span className="font-semibold">Prescription ID:</span>{' '}
+            {prescription.prescription_id}
+          </p>
+        </div>
+        <div className="text-right">
+          <p>
+            <span className="font-semibold">Date:</span>{' '}
+            {(approvedAt ?? new Date()).toLocaleDateString()}
+          </p>
+          <p>
+            <span className="font-semibold">Status:</span>{' '}
+            {prescription.status === 'MODIFIED' ? 'Approved (modified by doctor)' : 'Approved'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <p className="text-2xl font-serif">℞</p>
+        <table className="mt-2 w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-black text-left">
+              <th className="py-1 pr-2">Medicine</th>
+              <th className="py-1 pr-2">Dosage</th>
+              <th className="py-1 pr-2">Frequency</th>
+              <th className="py-1 pr-2">Duration</th>
+              <th className="py-1">Instructions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {prescription.medications.map((med, index) => (
+              <tr key={`${med.name}-${index}`} className="border-b border-rule">
+                <td className="py-2 pr-2 font-semibold">{med.name}</td>
+                <td className="py-2 pr-2 font-mono">{med.dosage}</td>
+                <td className="py-2 pr-2">{med.frequency}</td>
+                <td className="py-2 pr-2">{med.duration}</td>
+                <td className="py-2">{med.instructions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {prescription.instructions && (
+        <div className="mt-4 text-[13px]">
+          <p className="font-semibold">General advice</p>
+          <p className="mt-1">{prescription.instructions}</p>
+        </div>
+      )}
+
+      {prescription.doctor_notes && (
+        <div className="mt-4 text-[13px]">
+          <p className="font-semibold">Note from your doctor</p>
+          <p className="mt-1">{prescription.doctor_notes}</p>
+        </div>
+      )}
+
+      <div className="mt-16 flex justify-end">
+        <div className="w-64 text-right text-[13px]">
+          <p
+            className="text-2xl italic"
+            style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}
+          >
+            {prescription.doctor_name ?? clinicInfo?.doctor_name ?? 'Attending Physician'}
+          </p>
+          <div className="mt-1 border-t border-black pt-1">
+            <p className="font-semibold">
+              {prescription.doctor_name ?? clinicInfo?.doctor_name}
+            </p>
+            {clinicInfo?.doctor_qualification && <p>{clinicInfo.doctor_qualification}</p>}
+            {clinicInfo?.doctor_registration_no && (
+              <p>Reg. No: {clinicInfo.doctor_registration_no}</p>
+            )}
+            {approvedAt && (
+              <p className="mt-1 text-[11px]">
+                Digitally authenticated · {approvedAt.toLocaleString()}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-10 border-t border-black pt-2 text-[10px] leading-relaxed">
+        This is a digitally generated prescription, reviewed and approved by the physician named
+        above. Medicine names, dosages and durations are reproduced exactly as approved. Prepared
+        via a multilingual clinical intake assistant; the assistant does not diagnose or
+        prescribe — every clinical decision on this document was made by the physician.
+      </p>
+    </div>
+  );
+}
+
 function PrescriptionView({
   prescription,
   languages,
   activeLanguage,
   loading,
   onLanguageChange,
+  clinicInfo,
+  patientId,
 }: {
   prescription: PresentedPrescription;
   languages: Language[];
   activeLanguage: string;
   loading: boolean;
   onLanguageChange: (code: string) => void;
+  clinicInfo: ClinicInfo | null;
+  patientId: string | null;
 }) {
   const localised = activeLanguage !== 'en';
 
   return (
-    <div className="animate-rise space-y-8">
-      <div>
-        <p className="label-meta text-risk-low">Approved by your doctor</p>
-        <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
-        {prescription.doctor_name && (
-          <p className="mt-2 text-[13px] text-ink-muted">
-            Reviewed by {prescription.doctor_name}
-            {prescription.approved_at &&
-              ` · ${new Date(prescription.approved_at).toLocaleString()}`}
-          </p>
-        )}
-      </div>
+    <>
+      {/* Only present in the DOM for print (see globals.css's print rules) —
+          a `print:hidden` ancestor would hide this too if it were nested
+          inside the screen-only block below, so it's a sibling instead.
+          Always English/canonical: a printed prescription handed to a
+          pharmacist should read exactly as the doctor approved it, not in
+          whatever display language happened to be selected on screen. */}
+      <PrintablePrescription
+        prescription={prescription}
+        clinicInfo={clinicInfo}
+        patientId={patientId}
+      />
 
-      <div>
-        <h2 className="label-meta">Show in</h2>
+      <div className="animate-rise space-y-8 print:hidden">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="label-meta text-risk-low">Approved by your doctor</p>
+            <h1 className="mt-3 text-title font-semibold text-ink">Your prescription</h1>
+            {prescription.doctor_name && (
+              <p className="mt-2 text-[13px] text-ink-muted">
+                Reviewed by {prescription.doctor_name}
+                {prescription.approved_at &&
+                  ` · ${new Date(prescription.approved_at).toLocaleString()}`}
+              </p>
+            )}
+          </div>
+          <button onClick={() => window.print()} className="btn-secondary shrink-0">
+            Print / Download PDF
+          </button>
+        </div>
+
+        <div>
+          <h2 className="label-meta">Show in</h2>
         <div className="mt-2 flex flex-wrap gap-px border border-rule bg-rule">
           {languages.map((lang) => (
             <button
@@ -792,7 +1089,12 @@ function PrescriptionView({
                   <dd className="mt-0.5 text-ink" lang={localised ? activeLanguage : undefined}>
                     {localised && med.frequency_localised ? med.frequency_localised : med.frequency}
                   </dd>
-                  {localised && med.frequency_localised && (
+                  {/* Only show the English original as a second line when the
+                      "translation" actually differs from it — without an
+                      LLM, translation can silently fall back to the
+                      untranslated source, and showing identical text twice
+                      reads as a rendering bug, not a feature. */}
+                  {localised && med.frequency_localised && med.frequency_localised !== med.frequency && (
                     <dd className="mt-0.5 text-[12px] text-ink-faint">{med.frequency}</dd>
                   )}
                 </div>
@@ -808,7 +1110,7 @@ function PrescriptionView({
                         ? med.instructions_localised
                         : med.instructions}
                     </dd>
-                    {localised && med.instructions_localised && (
+                    {localised && med.instructions_localised && med.instructions_localised !== med.instructions && (
                       <dd className="mt-1 text-[12px] leading-relaxed text-ink-faint">
                         {med.instructions}
                       </dd>
@@ -832,11 +1134,13 @@ function PrescriptionView({
               ? prescription.instructions_localised
               : prescription.instructions}
           </p>
-          {localised && prescription.instructions_localised && (
-            <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
-              {prescription.instructions}
-            </p>
-          )}
+          {localised &&
+            prescription.instructions_localised &&
+            prescription.instructions_localised !== prescription.instructions && (
+              <p className="mt-2 max-w-reading text-[12px] leading-relaxed text-ink-faint">
+                {prescription.instructions}
+              </p>
+            )}
         </section>
       )}
 
@@ -849,10 +1153,11 @@ function PrescriptionView({
         </section>
       )}
 
-      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
-        Take this exactly as written. If your symptoms get worse or you feel unwell in a new
-        way, contact your doctor or seek urgent care.
-      </p>
-    </div>
+        <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
+          Take this exactly as written. If your symptoms get worse or you feel unwell in a new
+          way, contact your doctor or seek urgent care.
+        </p>
+      </div>
+    </>
   );
 }

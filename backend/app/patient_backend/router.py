@@ -4,9 +4,15 @@ Nothing here reaches a prescription directly. Draft creation goes through
 CaseService, and the only route that returns prescription content
 (`GET /api/prescriptions/{id}`) is gated by guards.may_release_to_patient, so
 a draft cannot reach a patient even if its id is known.
+
+Appointment booking is the one exception to "nothing here decides anything":
+booking is never a risk decision (that's app.safety.engine's job alone), it's
+just recording that a patient confirmed a visit the case already recommended.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -14,11 +20,15 @@ from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.prescription_service import PrescriptionService
 from app.services.triage_service import TriageService
+from app.shared import clinic
 from app.shared.database import db
 from app.shared.languages import all_languages, is_supported, resolve
 from app.shared.models import (
+    Appointment,
+    AppointmentType,
     AssessRequest,
     AssessResponse,
+    BookAppointmentRequest,
     CreateCaseRequest,
     CreateSessionRequest,
     PatientSession,
@@ -50,6 +60,15 @@ def list_languages():
             for lang in all_languages()
         ]
     }
+
+
+@router.get("/api/clinic-info")
+def get_clinic_info():
+    """Letterhead metadata for the printable prescription. Not authenticated
+    — a patient needs this to render their own approved prescription, and it
+    carries no clinical content, only display identity (hospital/doctor
+    name, address, registration numbers)."""
+    return clinic.letterhead()
 
 
 @router.post("/api/patient/session", response_model=PatientSession)
@@ -96,6 +115,8 @@ async def handle_triage_message(payload: TriageMessageRequest):
         missing_information=assessment.missing_information,
         red_flags=assessment.red_flags,
         urgent_guidance=result.get("urgent_guidance"),
+        recommend_appointment=assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN),
+        recommended_specialty=case.recommended_specialty,
         clinical_state=case,
     )
 
@@ -123,6 +144,8 @@ async def assess_session(payload: AssessRequest):
         draft_generated=outcome["draft_generated"],
         draft_blocked_reason=outcome["blocked_reason"],
         patient_status=session.status,
+        recommend_appointment=assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN),
+        recommended_specialty=case.recommended_specialty,
     )
 
 
@@ -143,6 +166,15 @@ def get_triage_state(session_id: str):
         "case": case,
         "triage_status": case.triage_status.value if case else RiskState.UNCERTAIN.value,
         "missing_information": case.missing_information if case else [],
+        "recommend_appointment": (
+            case.triage_status in (RiskState.URGENT, RiskState.UNCERTAIN) if case else False
+        ),
+        "recommended_specialty": case.recommended_specialty if case else None,
+        "appointment": (
+            db.get_appointment(case.appointment_id)
+            if case and case.appointment_id
+            else None
+        ),
     }
 
 
@@ -190,6 +222,9 @@ def get_patient_status(session_id: str):
         and prescription.status == PrescriptionStatus.REJECTED
     )
 
+    consultation = db.get_consultation(case.consultation_id) if case.consultation_id else None
+    visit_report_available = bool(consultation and consultation.status == "COMPLETED")
+
     if release.allowed:
         message = "Your doctor has completed the review. Your prescription is ready."
     elif rejected:
@@ -215,7 +250,77 @@ def get_patient_status(session_id: str):
         prescription_id=prescription.prescription_id if release.allowed else None,
         rejected=rejected,
         message=message,
+        recommend_appointment=case.triage_status in (RiskState.URGENT, RiskState.UNCERTAIN),
+        recommended_specialty=case.recommended_specialty,
+        appointment=db.get_appointment(case.appointment_id) if case.appointment_id else None,
+        visit_report_available=visit_report_available,
+        visit_report=consultation.report_translated if visit_report_available else None,
+        visit_report_lang=consultation.report_lang if visit_report_available else None,
     )
+
+
+@router.post("/api/appointments/book", response_model=Appointment)
+def book_appointment(payload: BookAppointmentRequest):
+    """Record a patient-confirmed booking.
+
+    Never called automatically — app.services never books on a patient's
+    behalf, even for URGENT. This is the explicit confirmation step.
+    """
+    case = db.get_case(payload.case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # URGENT always resolves to an emergency slot regardless of whether a
+    # specialty was also passed — case triage status takes precedence.
+    if case.triage_status == RiskState.URGENT:
+        apt_type = AppointmentType.URGENT_EMERGENCY
+    elif payload.specialty:
+        apt_type = AppointmentType.SPECIALIST_CONSULT
+    else:
+        apt_type = AppointmentType.OPTIONAL_CONSULT
+
+    if payload.slot_time:
+        slot = payload.slot_time
+    elif apt_type == AppointmentType.URGENT_EMERGENCY:
+        slot = (datetime.now(timezone.utc) + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M")
+    else:
+        slot = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d 10:00 AM")
+
+    location = payload.clinic_location or "Main OPD Clinic, Room 102"
+
+    notes = "Patient requested consultation appointment"
+    if apt_type == AppointmentType.URGENT_EMERGENCY:
+        notes = (
+            f"PATIENT-CONFIRMED EMERGENCY APPOINTMENT: Red Flags {', '.join(case.red_flags)}"
+            if case.red_flags else "Patient-confirmed emergency appointment"
+        )
+
+    appointment = Appointment(
+        case_id=case.case_id,
+        patient_id=case.patient_id,
+        type=apt_type,
+        slot_time=slot,
+        clinic_location=location,
+        notes=notes,
+        specialty=payload.specialty or case.recommended_specialty,
+    )
+    db.save_appointment(appointment)
+    case.appointment_id = appointment.appointment_id
+    db.save_case(case)
+    db.record_audit(
+        "APPOINTMENT_BOOKED", case_id=case.case_id, actor="patient",
+        detail=f"{apt_type.value} booked for {slot}",
+        metadata={"specialty": appointment.specialty},
+    )
+    return appointment
+
+
+@router.get("/api/appointments/{appointment_id}", response_model=Appointment)
+def get_appointment(appointment_id: str):
+    appointment = db.get_appointment(appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return appointment
 
 
 @router.get("/api/prescriptions/{prescription_id}", response_model=PresentedPrescription)

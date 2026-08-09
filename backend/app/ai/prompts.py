@@ -283,3 +283,70 @@ def build_translation_messages(text: str, target_lang: str) -> List[Dict[str, st
         {"role": "system", "content": system},
         {"role": "user", "content": f"Translate this text:\n\n{text}"},
     ]
+
+
+# --------------------------------------------------------------------------
+# Live consultation: spoken-dialogue translation (either direction)
+# --------------------------------------------------------------------------
+
+_DIALOGUE_TRANSLATION_SYSTEM = """You are interpreting live, spoken conversation between a doctor and a patient in a clinical consultation, from {source_name} into {target_name}.
+
+RULES
+- Translate naturally, the way a skilled human interpreter would speak it aloud — not a stiff literal rendering.
+- Preserve the meaning exactly. Do not add reassurance, warnings, or clarifications that were not said. Do not soften or sharpen anything.
+- Keep medication names, dosages and numbers exactly as given, in their original form.
+- If a speaker is unclear or the audio-to-text seems garbled, translate what is there rather than guessing at intent.
+- Output ONLY the translation, in {target_name} using {target_script}. No notes, no original-language echo.
+
+Return JSON only: {{"text": "...", "language": "{target_code}"}}"""
+
+
+def build_dialogue_translation_messages(
+    text: str, source_lang: str, target_lang: str
+) -> List[Dict[str, str]]:
+    source = resolve(source_lang)
+    target = resolve(target_lang)
+    target_script = (
+        "the Latin alphabet"
+        if target.code == "en"
+        else f"native {target.english_name} script ({target.native_name})"
+    )
+    system = _DIALOGUE_TRANSLATION_SYSTEM.format(
+        source_name=source.english_name,
+        target_name=target.english_name,
+        target_script=target_script,
+        target_code=target.code,
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": text},
+    ]
+
+
+# --------------------------------------------------------------------------
+# Live consultation: end-of-visit report
+# --------------------------------------------------------------------------
+
+_VISIT_REPORT_SYSTEM = """You write the English clinical note for an in-person consultation that has just concluded, for the doctor's record and for the patient (translated separately).
+
+RULES
+- Use only what is in the prior intake summary and the consultation exchange given to you. Add nothing.
+- No diagnosis, no differential, no treatment plan beyond what the doctor actually said in the exchange.
+- Structure: one short paragraph restating the presenting complaint and prior context, then one paragraph summarising what was discussed and decided in the consultation itself.
+- Neutral clinical register. 60 to 140 words. No headings, no bullets.
+
+Return the note only."""
+
+
+def build_visit_report_messages(
+    prior_summary: str, exchange_lines: List[str]
+) -> List[Dict[str, str]]:
+    exchange_text = "\n".join(exchange_lines) if exchange_lines else "No exchange recorded."
+    user = (
+        f"Prior intake summary:\n{prior_summary or 'None recorded.'}\n\n"
+        f"Consultation exchange (English):\n{exchange_text}"
+    )
+    return [
+        {"role": "system", "content": _VISIT_REPORT_SYSTEM},
+        {"role": "user", "content": user},
+    ]

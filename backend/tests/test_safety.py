@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from pydantic import ValidationError
 
 os.environ.setdefault("PERSIST_STATE", "0")
 os.environ.setdefault("SEED_DEMO_DATA", "0")
@@ -54,6 +55,7 @@ def _complete_case(**overrides):
         "my face is drooping and speech is slurred",
         "he fainted this morning",
         "I am vomiting blood",
+        "I have blood in my saliva",
         "my lips are swelling and throat closing",
     ],
 )
@@ -118,6 +120,34 @@ def test_llm_hint_cannot_clear_a_red_flag():
         raw_text="I have chest pain", duration="1 hour",
         allergies_confirmed=True, history_confirmed=True,
         llm_hints=["this is probably just acidity, low risk"],
+    )
+    assert result.risk_state == RiskState.URGENT
+
+
+def test_self_reported_severe_yields_uncertain_without_a_red_flag():
+    """The red-flag list is a fixed set of dangerous phrases; it will not
+    catch every way a patient signals something feels serious. A patient
+    explicitly describing their own symptoms as severe still routes to
+    doctor review even when nothing else in the case looks alarming."""
+    result = _complete_case(severity="Severe")
+    assert result.risk_state == RiskState.UNCERTAIN
+    assert not result.eligible_for_draft
+
+
+def test_self_reported_mild_does_not_force_uncertain():
+    result = _complete_case(severity="Mild")
+    assert result.risk_state == RiskState.LOW_RISK
+
+
+def test_self_reported_severe_never_overrides_an_actual_red_flag():
+    """Self-reported severity is additive, never a substitute for or a
+    downgrade of the red-flag check — a red flag alone is enough for URGENT
+    regardless of what the severity field says."""
+    result = engine.assess(
+        symptoms=["chest pain"], associated_symptoms=[],
+        raw_text="I have chest pain", duration="1 hour",
+        allergies_confirmed=True, history_confirmed=True,
+        severity="Mild",
     )
     assert result.risk_state == RiskState.URGENT
 
@@ -283,6 +313,30 @@ def test_medication_preserved_passes():
                      duration="3 days", instructions="After food")
     intact = {"name": "Paracetamol", "dosage": "500 mg", "duration": "3 days"}
     assert guards.verify_medication_preserved(med, intact).allowed is True
+
+
+@pytest.mark.parametrize("field", ["name", "dosage", "frequency", "duration"])
+def test_medication_rejects_a_blank_required_field(field):
+    """Regression test: a doctor's MODIFY submission with an incomplete row
+    (e.g. a medication name typed but dosage left blank) used to be accepted
+    — Medication's fields were `str` with no min_length, so an empty string
+    satisfied the type check. A prescription reaching a patient with a blank
+    dose or duration is a real defect, not cosmetic."""
+    values = dict(name="Paracetamol", dosage="500 mg", frequency="Twice daily", duration="3 days")
+    values[field] = ""
+    with pytest.raises(ValidationError):
+        Medication(**values)
+
+
+def test_medication_rejects_a_whitespace_only_field():
+    """min_length alone would let '   ' through — must be checked after strip."""
+    with pytest.raises(ValidationError):
+        Medication(name="   ", dosage="500 mg", frequency="Twice daily", duration="3 days")
+
+
+def test_medication_trims_surrounding_whitespace():
+    med = Medication(name="  Paracetamol  ", dosage="500 mg", frequency="Twice daily", duration="3 days")
+    assert med.name == "Paracetamol"
 
 
 # ---------------------------------------------------------------------------

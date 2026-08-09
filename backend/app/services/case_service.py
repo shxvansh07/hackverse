@@ -13,17 +13,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.ai.service import ai_service
 from app.rag.engine import rag_engine
-from app.safety import guards
+from app.safety import guards, specialty
 from app.safety.engine import SafetyAssessment
 from app.services.triage_service import TriageService
 from app.shared.database import db
 from app.shared.models import (
+    Appointment,
+    AppointmentType,
     DecisionType,
     Medication,
     PatientSession,
     PatientStatus,
     Prescription,
     PrescriptionStatus,
+    ReferralInfo,
     ReviewStatus,
     RiskState,
     TriageCase,
@@ -71,6 +74,9 @@ class CaseService:
             else:
                 case.review_status = ReviewStatus.NEEDS_REVIEW
                 session.status = PatientStatus.WAITING_FOR_DOCTOR
+
+            if assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN):
+                case.recommended_specialty = specialty.recommend_specialty(assessment.red_flag_codes)
 
         elif case.prescription_id:
             draft_generated = True  # already drafted; nothing further to do
@@ -210,6 +216,10 @@ class CaseService:
         notes: Optional[str] = None,
         modified_medications: Optional[List[Medication]] = None,
         modified_instructions: Optional[str] = None,
+        referral_specialty: Optional[str] = None,
+        referral_notes: Optional[str] = None,
+        offline_appointment_time: Optional[str] = None,
+        offline_clinic_location: Optional[str] = None,
     ) -> Tuple[ReviewStatus, Optional[Prescription], bool, str]:
         """Record a doctor decision.
 
@@ -268,6 +278,40 @@ class CaseService:
             case.review_status = ReviewStatus.REJECTED
             message = "Draft rejected. It will not be shown to the patient as a prescription."
 
+        elif decision == DecisionType.REFERRAL:
+            referral = ReferralInfo(
+                specialty=referral_specialty or case.recommended_specialty or "Specialist Consultation",
+                referral_notes=referral_notes or "",
+                doctor_name=doctor_name,
+            )
+            case.referral = referral
+            case.review_status = ReviewStatus.REFERRED
+            message = f"Patient referred to {referral.specialty}."
+            if prescription is not None:
+                prescription.referral = referral
+                prescription.status = PrescriptionStatus.APPROVED
+                released = True
+
+        elif decision == DecisionType.OFFLINE_APPOINTMENT:
+            appointment = Appointment(
+                case_id=case.case_id,
+                patient_id=case.patient_id,
+                doctor_id=doctor_id,
+                doctor_name=doctor_name,
+                type=AppointmentType.DOCTOR_SCHEDULED_OFFLINE,
+                slot_time=offline_appointment_time or "",
+                clinic_location=offline_clinic_location or "Main Hospital Clinic, Room 102",
+                notes=notes or "Doctor-scheduled in-person appointment.",
+                specialty=case.recommended_specialty,
+            )
+            db.save_appointment(appointment)
+            case.appointment_id = appointment.appointment_id
+            case.review_status = ReviewStatus.OFFLINE_SCHEDULED
+            message = f"In-person appointment scheduled for {appointment.slot_time or 'a time to be confirmed'}."
+            if prescription is not None:
+                prescription.status = PrescriptionStatus.APPROVED
+                released = True
+
         else:  # NEEDS_REVIEW
             if prescription is not None:
                 prescription.status = PrescriptionStatus.NEEDS_REVIEW
@@ -278,7 +322,10 @@ class CaseService:
             prescription.doctor_id = doctor_id
             prescription.doctor_name = doctor_name
             prescription.doctor_notes = notes
-            if decision in (DecisionType.APPROVE, DecisionType.MODIFY):
+            if decision in (
+                DecisionType.APPROVE, DecisionType.MODIFY,
+                DecisionType.REFERRAL, DecisionType.OFFLINE_APPOINTMENT,
+            ):
                 prescription.approved_at = _now()
                 prescription.is_ai_draft = False
                 # Cached translations belong to the superseded content.
@@ -293,6 +340,8 @@ class CaseService:
                 session.status = PatientStatus.APPROVED
             elif decision == DecisionType.REJECT:
                 session.status = PatientStatus.REVIEW_COMPLETE
+            elif decision in (DecisionType.REFERRAL, DecisionType.OFFLINE_APPOINTMENT):
+                session.status = PatientStatus.APPROVED if released else PatientStatus.REVIEW_COMPLETE
             else:
                 session.status = PatientStatus.WAITING_FOR_DOCTOR
             db.save_session(session)

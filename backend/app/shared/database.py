@@ -24,8 +24,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.shared.models import (
+    Appointment,
     AuditEvent,
     ChatMessage,
+    LiveConsultation,
     PatientSession,
     PatientStatus,
     Prescription,
@@ -55,6 +57,8 @@ class ClinicalStore:
         self.sessions: Dict[str, PatientSession] = {}
         self.cases: Dict[str, TriageCase] = {}
         self.prescriptions: Dict[str, Prescription] = {}
+        self.appointments: Dict[str, Appointment] = {}
+        self.consultations: Dict[str, LiveConsultation] = {}
         self.audit: List[AuditEvent] = []
 
         self._persist = persist and os.getenv("PERSIST_STATE", "1") != "0"
@@ -87,6 +91,8 @@ class ClinicalStore:
             "sessions": {k: v.model_dump() for k, v in self.sessions.items()},
             "cases": {k: v.model_dump() for k, v in self.cases.items()},
             "prescriptions": {k: v.model_dump() for k, v in self.prescriptions.items()},
+            "appointments": {k: v.model_dump() for k, v in self.appointments.items()},
+            "consultations": {k: v.model_dump() for k, v in self.consultations.items()},
         }
         target = self._state_path()
         try:
@@ -119,13 +125,23 @@ class ClinicalStore:
                 k: Prescription.model_validate(v)
                 for k, v in payload.get("prescriptions", {}).items()
             }
+            self.appointments = {
+                k: Appointment.model_validate(v)
+                for k, v in payload.get("appointments", {}).items()
+            }
+            self.consultations = {
+                k: LiveConsultation.model_validate(v)
+                for k, v in payload.get("consultations", {}).items()
+            }
             logger.info(
-                "Restored %d sessions, %d cases, %d prescriptions",
+                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations",
                 len(self.sessions), len(self.cases), len(self.prescriptions),
+                len(self.appointments), len(self.consultations),
             )
         except Exception as exc:  # noqa: BLE001 - a bad snapshot must not block boot
             logger.error("State snapshot incompatible, starting empty: %s", exc)
             self.sessions, self.cases, self.prescriptions = {}, {}, {}
+            self.appointments, self.consultations = {}, {}
 
     # ----------------------------------------------------------------- audit
 
@@ -188,6 +204,18 @@ class ClinicalStore:
             self._save()
         return prescription
 
+    def save_appointment(self, appointment: Appointment) -> Appointment:
+        with self._lock:
+            self.appointments[appointment.appointment_id] = appointment
+            self._save()
+        return appointment
+
+    def save_consultation(self, consultation: LiveConsultation) -> LiveConsultation:
+        with self._lock:
+            self.consultations[consultation.consultation_id] = consultation
+            self._save()
+        return consultation
+
     # -------------------------------------------------------------- queries
 
     def get_session(self, session_id: str) -> Optional[PatientSession]:
@@ -209,6 +237,18 @@ class ClinicalStore:
         case = self.get_case(case_id)
         if case and case.prescription_id:
             return self.prescriptions.get(case.prescription_id)
+        return None
+
+    def get_appointment(self, appointment_id: str) -> Optional[Appointment]:
+        return self.appointments.get(appointment_id)
+
+    def get_consultation(self, consultation_id: str) -> Optional[LiveConsultation]:
+        return self.consultations.get(consultation_id)
+
+    def get_consultation_for_case(self, case_id: str) -> Optional[LiveConsultation]:
+        case = self.get_case(case_id)
+        if case and case.consultation_id:
+            return self.consultations.get(case.consultation_id)
         return None
 
     def list_cases(
@@ -236,6 +276,8 @@ class ClinicalStore:
             self.sessions.clear()
             self.cases.clear()
             self.prescriptions.clear()
+            self.appointments.clear()
+            self.consultations.clear()
             self.audit.clear()
 
     # ----------------------------------------------------------- demo seeds

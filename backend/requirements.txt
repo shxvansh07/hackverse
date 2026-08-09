@@ -4,5 +4,10 @@ pydantic>=2.6.0
 python-dotenv>=1.0.0
 httpx>=0.24.0,<0.28
 
+# ML condition classifier (app.patient_backend.ml_predictor) — trained
+# in-process at import time on patient_backend/data/*.csv, no model file.
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
 # Tests
 pytest>=8.0.0

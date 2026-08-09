@@ -72,11 +72,61 @@ def test_doctor_endpoints_require_auth():
     assert client.get("/api/doctor/cases/CASE-X").status_code == 401
 
 
+def test_clinic_info_is_public_and_has_letterhead_fields():
+    """Needed by the patient's printable prescription — must not require
+    doctor auth, since the patient is the one rendering it."""
+    resp = client.get("/api/clinic-info")
+    assert resp.status_code == 200
+    body = resp.json()
+    for field in (
+        "hospital_name", "hospital_address", "hospital_registration_no",
+        "doctor_name", "doctor_qualification", "doctor_registration_no",
+    ):
+        assert body.get(field)
+
+
 def test_bad_credentials_rejected():
     resp = client.post(
         "/api/auth/doctor/login", json={"username": "doctor", "password": "wrong"}
     )
     assert resp.status_code == 401
+
+
+def test_repeated_failed_logins_lock_out_even_correct_credentials():
+    """Brute-force protection: enough wrong attempts against one username
+    locks it out for a cooldown window, regardless of what is tried next —
+    including the real password. The locked-out response is a distinct 429
+    with a "try again in N minutes" message, not the same generic 401 as a
+    plain wrong password — conflating the two is confusing in practice (a
+    doctor who mistypes their password a few times can no longer tell
+    "locked out" from "wrong password" when they then type it correctly).
+    Explicitly restores auth module state afterwards so later tests'
+    auth_headers() fixture is unaffected."""
+    from app.shared import auth as auth_module
+
+    saved_attempts = dict(auth_module._FAILED_ATTEMPTS)
+    saved_tokens = dict(auth_module._ACTIVE_TOKENS)
+    try:
+        auth_module._FAILED_ATTEMPTS.clear()
+        for _ in range(auth_module._MAX_FAILED_ATTEMPTS):
+            resp = client.post(
+                "/api/auth/doctor/login",
+                json={"username": DOCTOR_USER, "password": "definitely-wrong"},
+            )
+            assert resp.status_code == 401
+
+        # One more attempt, this time with the real password — still locked
+        # out, but distinguishably so (429, not 401).
+        resp = client.post(
+            "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
+        )
+        assert resp.status_code == 429
+        assert "try again" in resp.json()["detail"].lower()
+    finally:
+        auth_module._FAILED_ATTEMPTS.clear()
+        auth_module._FAILED_ATTEMPTS.update(saved_attempts)
+        auth_module._ACTIVE_TOKENS.clear()
+        auth_module._ACTIVE_TOKENS.update(saved_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +529,62 @@ def test_questions_are_not_repeated():
     replies = [send(session_id, msg)["ai_response"] for msg in
                ["I have a fever", "about 3 days", "also a headache", "no allergies"]]
     assert len(set(replies)) == len(replies)
+
+
+def test_intake_completes_with_zero_llm_providers():
+    """Regression test for a real bug: without an LLM, extraction never ran,
+    so symptoms/duration (both required) could never leave
+    missing_information and intake could never complete — the fallback
+    question bank would cycle through every question once and then repeat
+    "anything else?" forever. The very first patient answer was also being
+    silently dropped, because the greeting wasn't recognised as implicitly
+    asking about symptoms.
+
+    Also covers the fix for a second, related complaint: intake used to be
+    able to end the moment ANY question got a "no" (e.g. "no allergies"),
+    skipping the rest of the history-taking and never asking whether there
+    was anything else before handing off. It must now walk the full fixed
+    order (fallback_questions.QUESTION_ORDER) and only end on a "no" to the
+    closing question specifically."""
+    session_id = start_session("en")
+
+    r = send(session_id, "i have a strong headache")  # answers: symptoms
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: associated_symptoms
+    assert r["is_complete"] is False
+
+    r = send(session_id, "2 days")  # answers: duration
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: allergies
+    assert r["is_complete"] is False, "a 'no' mid-interview must not end the whole conversation"
+
+    r = send(session_id, "no")  # answers: medical_history
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: medications
+    assert r["is_complete"] is False
+
+    r = send(session_id, "no")  # answers: anything_else (the closing question)
+    assert r["is_complete"] is True, "must complete once the closing question is answered"
+
+    case = db.get_case(r["case_id"])
+    assert case.symptoms, "symptoms should have been captured from the raw answer"
+    assert case.duration, "duration should have been captured from the raw answer"
+    assert case.allergies_confirmed
+    assert case.history_confirmed
+
+
+def test_first_patient_answer_is_not_dropped():
+    """The greeting implicitly asks about symptoms; a patient's very first
+    reply must be captured, not silently discarded while the bot re-asks the
+    same question."""
+    session_id = start_session("en")
+    send(session_id, "i have a headache")
+
+    case = db.get_case_by_session(session_id)
+    assert case.symptoms == ["i have a headache"]
 
 
 def test_empty_message_rejected():
