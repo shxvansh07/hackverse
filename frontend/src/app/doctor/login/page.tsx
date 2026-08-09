@@ -165,7 +165,9 @@ export default function DoctorLoginPage() {
               setMode(mode === 'login' ? 'register' : 'login');
               setError(null);
             }}
-            className="mt-5 cursor-pointer text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
+            // Text link by appearance, but it switches the whole form, so it
+            // gets a real tap target rather than a 20px-tall strip of text.
+            className="mt-3 inline-flex min-h-[44px] cursor-pointer items-center text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
           >
             {mode === 'login' ? 'Create an account instead' : 'Sign in instead'}
           </button>
@@ -183,7 +185,10 @@ export default function DoctorLoginPage() {
       <footer className="border-t border-rule">
         <div className="mx-auto flex max-w-md items-center justify-between px-6 py-4">
           <span className="label-meta">Doctor</span>
-          <Link href="/patient" className="text-[13px] text-ink-muted underline underline-offset-2">
+          <Link
+            href="/patient"
+            className="-my-2 inline-flex min-h-[44px] items-center text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
+          >
             Patient intake
           </Link>
         </div>
