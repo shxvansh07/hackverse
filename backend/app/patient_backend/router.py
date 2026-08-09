@@ -31,6 +31,8 @@ from app.shared.models import (
     BookAppointmentRequest,
     CreateCaseRequest,
     CreateSessionRequest,
+    CreateProfileRequest,
+    PatientProfile,
     PatientSession,
     PatientStatus,
     PatientStatusResponse,
@@ -71,6 +73,45 @@ def get_clinic_info():
     return clinic.letterhead()
 
 
+@router.post("/api/patient/profile", response_model=PatientProfile)
+def create_patient_profile(payload: CreateProfileRequest):
+    profile = PatientProfile(
+        name=payload.name,
+        age=payload.age,
+    )
+    db.save_patient(profile)
+    return profile
+
+
+@router.get("/api/patient/{patient_id}/history")
+def get_patient_history(patient_id: str):
+    patient = db.get_patient(patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient profile not found")
+        
+    history = []
+    # Find all cases for this patient
+    patient_cases = [c for c in db.cases.values() if c.patient_id == patient_id]
+    # Sort by descending creation date
+    patient_cases.sort(key=lambda c: c.created_at if hasattr(c, 'created_at') else c.case_id, reverse=True)
+    
+    for case in patient_cases:
+        item = {
+            "case_id": case.case_id,
+            "session_id": case.session_id,
+            "chief_complaint": case.chief_complaint,
+            "triage_status": case.triage_status,
+            "timestamp": case.created_at,
+            "prescription_id": case.prescription_id,
+            "consultation_id": case.consultation_id,
+            "has_prescription": bool(case.prescription_id),
+            "has_consultation": bool(case.consultation_id)
+        }
+        history.append(item)
+        
+    return {"history": history}
+
+
 @router.post("/api/patient/session", response_model=PatientSession)
 def create_patient_session(payload: CreateSessionRequest):
     if not is_supported(payload.preferred_language):
@@ -78,6 +119,7 @@ def create_patient_session(payload: CreateSessionRequest):
     session, _ = TriageService.create_session(
         preferred_language=payload.preferred_language,
         patient_name=payload.patient_name or "Patient",
+        patient_id=payload.patient_id,
     )
     return session
 

@@ -110,6 +110,8 @@ def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(requir
         raise HTTPException(status_code=404, detail="Case not found")
 
     prescription = db.get_prescription_for_case(case_id)
+    session = db.get_session(case.session_id)
+    patient = db.get_patient(case.patient_id)
 
     return {
         "case": case,
@@ -122,6 +124,8 @@ def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(requir
         "appointment": db.get_appointment(case.appointment_id) if case.appointment_id else None,
         "referral": case.referral,
         "consultation": db.get_consultation(case.consultation_id) if case.consultation_id else None,
+        "patient_name": patient.name if patient else (case.patient_name or (session.patient_name if session else "Patient")),
+        "patient_profile": patient.model_dump() if patient else None,
     }
 
 
