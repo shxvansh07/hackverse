@@ -587,13 +587,29 @@ function TextModeView({
   onClearError,
 }: any) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  
-  // Auto-scroll to bottom
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wasSending = useRef(false);
+
+  // Auto-scroll to bottom. Deliberately not keyed on `draft`: typing no longer
+  // renders anything in the transcript, so scrolling on each keystroke was
+  // just jitter.
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, draft, interim, sending]);
+  }, [messages, interim, sending]);
+
+  // The input is disabled while a message is in flight, and disabling an
+  // element blurs it — so after every send the patient had to click back into
+  // the box to type the next answer. Restore focus on the send->settled edge
+  // specifically, rather than on mount, so that arriving on the page does not
+  // pop up the keyboard on a phone before the patient has chosen to type.
+  useEffect(() => {
+    if (wasSending.current && !sending && !listening) {
+      inputRef.current?.focus();
+    }
+    wasSending.current = sending;
+  }, [sending, listening]);
 
   return (
     <div className="flex flex-col min-h-[75vh] relative pb-24">
@@ -639,13 +655,17 @@ function TextModeView({
            );
         })}
 
-        {/* Interim / Draft */}
-        {(draft || interim) && (
+        {/* Live speech only. What is being typed is already on screen in the
+            input, so echoing `draft` here showed every keystroke twice and
+            pushed a half-written sentence into the transcript before the
+            patient had decided to send it. Interim speech has nowhere else to
+            appear, so it still previews here. */}
+        {interim && (
           <div className="flex flex-col items-end animate-rise">
              <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl px-5 py-3 shadow-sm bg-accent/80 text-white rounded-tr-none">
                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80 mb-1">You</p>
                <p className="text-base leading-relaxed whitespace-pre-wrap italic opacity-90 break-words">
-                 {draft + (interim ? (draft ? ' ' : '') + interim : '')}
+                 {interim}
                </p>
              </div>
           </div>
@@ -675,10 +695,11 @@ function TextModeView({
            </button>
            
            <div className="flex-1 flex items-center gap-2 border border-rule rounded-full bg-surface py-2 px-4 shadow-sm focus-within:border-accent focus-within:shadow-md transition-all">
-              <input 
-                type="text" 
-                className="flex-1 bg-transparent outline-none text-ink placeholder-ink-faint text-base w-full" 
-                placeholder="Type your response..." 
+              <input
+                ref={inputRef}
+                type="text"
+                className="flex-1 bg-transparent outline-none text-ink placeholder-ink-faint text-base w-full"
+                placeholder="Type your response..."
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => {
@@ -773,12 +794,14 @@ function HandsFreeModeView({
            );
         })}
 
-        {/* Interim / Draft */}
-        {(draft || interim) && (
+        {/* Live speech only. Hands-free has no text input, so including
+            `draft` here surfaced whatever half-typed sentence was left behind
+            in text mode as a full-size quote on entering this view. */}
+        {interim && (
           <div className="opacity-100 scale-100 animate-rise transition-all duration-700">
              <p className="text-[12px] font-semibold text-accent/70 uppercase tracking-wider mb-2">You</p>
              <h2 className="text-3xl sm:text-4xl font-bold text-ink-muted italic leading-tight tracking-tight break-words">
-               "{draft + (interim ? (draft ? ' ' : '') + interim : '')}"
+               "{interim}"
              </h2>
           </div>
         )}
