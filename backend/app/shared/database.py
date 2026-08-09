@@ -37,6 +37,7 @@ from app.shared.models import (
     RiskState,
     SafetySignal,
     TriageCase,
+    PatientProfile,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class ClinicalStore:
         self.prescriptions: Dict[str, Prescription] = {}
         self.appointments: Dict[str, Appointment] = {}
         self.consultations: Dict[str, LiveConsultation] = {}
+        self.patients: Dict[str, PatientProfile] = {}
         self.audit: List[AuditEvent] = []
         #: normalized phone -> patient_id. The only mechanism by which a
         #: returning patient's new visit is linked to their past ones.
@@ -115,6 +117,7 @@ class ClinicalStore:
             "appointments": {k: v.model_dump() for k, v in self.appointments.items()},
             "consultations": {k: v.model_dump() for k, v in self.consultations.items()},
             "phone_index": dict(self.phone_index),
+            "patients": {k: v.model_dump() for k, v in self.patients.items()},
         }
         target = self._state_path()
         try:
@@ -156,15 +159,19 @@ class ClinicalStore:
                 for k, v in payload.get("consultations", {}).items()
             }
             self.phone_index = dict(payload.get("phone_index", {}))
+            self.patients = {
+                k: PatientProfile.model_validate(v)
+                for k, v in payload.get("patients", {}).items()
+            }
             logger.info(
-                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations",
+                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations, %d patients",
                 len(self.sessions), len(self.cases), len(self.prescriptions),
-                len(self.appointments), len(self.consultations),
+                len(self.appointments), len(self.consultations), len(self.patients)
             )
         except Exception as exc:  # noqa: BLE001 - a bad snapshot must not block boot
             logger.error("State snapshot incompatible, starting empty: %s", exc)
             self.sessions, self.cases, self.prescriptions = {}, {}, {}
-            self.appointments, self.consultations = {}, {}
+            self.appointments, self.consultations, self.patients = {}, {}, {}
             self.phone_index = {}
 
     # ----------------------------------------------------------------- audit
@@ -240,10 +247,19 @@ class ClinicalStore:
             self._save()
         return consultation
 
+    def save_patient(self, patient: PatientProfile) -> PatientProfile:
+        with self._lock:
+            self.patients[patient.patient_id] = patient
+            self._save()
+        return patient
+
     # -------------------------------------------------------------- queries
 
     def get_session(self, session_id: str) -> Optional[PatientSession]:
         return self.sessions.get(session_id)
+
+    def get_patient(self, patient_id: str) -> Optional[PatientProfile]:
+        return self.patients.get(patient_id)
 
     def get_case(self, case_id: str) -> Optional[TriageCase]:
         return self.cases.get(case_id)
@@ -339,6 +355,7 @@ class ClinicalStore:
             self.prescriptions.clear()
             self.appointments.clear()
             self.consultations.clear()
+            self.patients.clear()
             self.audit.clear()
             self.phone_index.clear()
 

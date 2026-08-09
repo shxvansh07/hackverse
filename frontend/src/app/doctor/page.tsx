@@ -340,10 +340,11 @@ export default function DoctorDashboard() {
                       {item.chief_complaint || item.symptoms[0] || 'Unspecified complaint'}
                     </p>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-faint">
-                      <span>{item.patient_id}</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-muted">
+                      <span className="font-semibold text-ink">{item.patient_name || item.patient_id}</span>
+                      {item.age && <span>Age: {item.age}</span>}
                       {item.duration && <span>{item.duration}</span>}
-                      <span>{new Date(item.created_at).toLocaleTimeString()}</span>
+                      <span>{new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                     </div>
 
                     <div className="mt-2 flex items-center gap-2">
@@ -515,11 +516,58 @@ function CaseReview({
           </span>
         </div>
 
-        <h2 className="mt-4 text-title font-semibold text-ink">
-          {kase.chief_complaint || kase.symptoms[0] || 'Unspecified complaint'}
+        <div className="mt-4 rounded-lg border border-rule bg-surface p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span className="text-[12px] font-semibold uppercase tracking-wider text-ink-faint">Patient Information</span>
+              <h3 className="text-xl font-bold text-ink">
+                {(detail.patient_name && detail.patient_name !== 'Patient')
+                  ? detail.patient_name
+                  : (kase.patient_name && kase.patient_name !== 'Patient'
+                    ? kase.patient_name
+                    : (detail.patient_profile?.name || 'Patient'))}
+              </h3>
+              <p className="text-sm text-ink-muted">
+                Patient ID: <span className="font-mono text-ink">{kase.patient_id}</span>
+                {' · Age: '}
+                <span className="font-medium text-ink">
+                  {kase.age || detail.patient_profile?.age || 'Not specified'}
+                </span>
+                {' · Language: '}
+                <span className="font-medium text-ink uppercase">{kase.preferred_language}</span>
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <RiskBadge risk={kase.triage_status} />
+              <ReviewBadge status={kase.review_status} />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-rule pt-3 text-sm sm:grid-cols-4">
+            <div>
+              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Medical History</span>
+              <span className="font-medium text-ink">{kase.medical_history.length > 0 ? kase.medical_history.join(', ') : 'None reported'}</span>
+            </div>
+            <div>
+              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Known Allergies</span>
+              <span className="font-medium text-ink">{kase.allergies.length > 0 ? kase.allergies.join(', ') : (kase.allergies_confirmed ? 'No known allergies' : 'Not confirmed')}</span>
+            </div>
+            <div>
+              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Current Medications</span>
+              <span className="font-medium text-ink">{kase.medications.length > 0 ? kase.medications.join(', ') : 'None'}</span>
+            </div>
+            <div>
+              <span className="block text-[11px] uppercase tracking-wider text-ink-faint">Symptoms & Duration</span>
+              <span className="font-medium text-ink">{kase.symptoms.join(', ') || 'N/A'} {kase.duration ? `(${kase.duration})` : ''}</span>
+            </div>
+          </div>
+        </div>
+
+        <h2 className="mt-6 text-title font-semibold text-ink">
+          Chief Complaint: {kase.chief_complaint || kase.symptoms[0] || 'Unspecified complaint'}
         </h2>
 
-        <p className="mt-4 max-w-reading text-body leading-relaxed text-ink">
+        <p className="mt-3 max-w-reading text-body leading-relaxed text-ink">
           {kase.summary_en || 'No summary generated.'}
         </p>
 

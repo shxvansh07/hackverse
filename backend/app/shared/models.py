@@ -278,6 +278,13 @@ class Prescription(BaseModel):
         return self.status in (PrescriptionStatus.APPROVED, PrescriptionStatus.MODIFIED)
 
 
+class PatientProfile(BaseModel):
+    patient_id: str = Field(default_factory=lambda: _new_id("PAT", 6))
+    name: str = ""
+    age: str = ""
+    created_at: str = Field(default_factory=_now)
+
+
 class PatientSession(BaseModel):
     session_id: str = Field(default_factory=lambda: _new_id("SESS"))
     patient_id: str = Field(default_factory=lambda: _new_id("PAT", 6))
@@ -294,6 +301,7 @@ class TriageCase(BaseModel):
     case_id: str = Field(default_factory=lambda: _new_id("CASE"))
     session_id: str
     patient_id: str
+    patient_name: str = "Patient"
     preferred_language: str = "en"
 
     # --- structured clinical fields -------------------------------------
@@ -381,6 +389,16 @@ class CreateSessionRequest(BaseModel):
     #: doctor sees history and settled allergy/history facts carry forward.
     #: Left blank, behaviour is unchanged from before this field existed.
     phone: Optional[str] = None
+    #: Optional. A client-supplied patient_id (e.g. from a prior
+    #: POST /api/patient/profile registration) takes precedence over phone
+    #: lookup when both are present — an explicit identity the client
+    #: already has is a stronger signal than a fresh phone lookup.
+    patient_id: Optional[str] = None
+
+
+class CreateProfileRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    age: str = Field(..., min_length=1)
 
 
 class TriageMessageRequest(BaseModel):

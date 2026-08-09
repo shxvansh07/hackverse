@@ -93,6 +93,11 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     base_url = "https://api.deepseek.com"
 
 
+class IBMBobProvider(OpenAICompatibleProvider):
+    name = "ibm"
+    base_url = "https://api.ibm.com/v1" # or OpenAI compatible endpoint if available
+
+
 class GeminiProvider(LLMProvider):
     """Google Gemini via generateContent.
 

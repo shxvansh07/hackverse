@@ -77,17 +77,23 @@ class TriageService:
 
     @staticmethod
     def create_session(
-        preferred_language: str, patient_name: str = "Patient", phone: Optional[str] = None,
+        preferred_language: str,
+        patient_name: str = "Patient",
+        phone: Optional[str] = None,
+        patient_id: Optional[str] = None,
     ) -> Tuple[PatientSession, TriageCase]:
         from app.shared.languages import resolve
 
         language = resolve(preferred_language)
 
-        # A phone number links this visit to any past ones by the same
-        # patient (see database.get_or_create_patient_id). Left blank, this
-        # behaves exactly as before phone-based identity existed: a fresh
-        # patient_id, no history.
-        patient_id = db.get_or_create_patient_id(phone) if phone else None
+        # An explicit patient_id (from a prior POST /api/patient/profile
+        # registration) is the strongest identity signal — honour it as-is.
+        # Otherwise a phone number links this visit to any past ones by the
+        # same patient (see database.get_or_create_patient_id). Left blank,
+        # this behaves exactly as before phone-based identity existed: a
+        # fresh patient_id, no history.
+        if not patient_id and phone:
+            patient_id = db.get_or_create_patient_id(phone)
 
         session_kwargs: Dict[str, Any] = dict(
             preferred_language=language.code,
@@ -98,9 +104,13 @@ class TriageService:
             session_kwargs["patient_id"] = patient_id
         session = PatientSession(**session_kwargs)
 
+        patient_profile = db.get_patient(session.patient_id) if session.patient_id else None
+
         case = TriageCase(
             session_id=session.session_id,
             patient_id=session.patient_id,
+            patient_name=patient_profile.name if patient_profile else session.patient_name,
+            age=patient_profile.age if patient_profile else "",
             preferred_language=language.code,
         )
 

@@ -136,6 +136,7 @@ export interface TriageCase {
   case_id: string;
   session_id: string;
   patient_id: string;
+  patient_name?: string;
   preferred_language: string;
   chief_complaint: string;
   symptoms: string[];
@@ -229,6 +230,25 @@ export interface PresentedPrescription {
   is_ai_draft: boolean;
 }
 
+export interface PatientProfile {
+  patient_id: string;
+  name: string;
+  age: string;
+  created_at: string;
+}
+
+export interface PatientHistoryItem {
+  case_id: string;
+  session_id: string;
+  chief_complaint: string;
+  triage_status: RiskState;
+  timestamp: string;
+  prescription_id: string | null;
+  consultation_id: string | null;
+  has_prescription: boolean;
+  has_consultation: boolean;
+}
+
 export interface PatientSession {
   session_id: string;
   patient_id: string;
@@ -314,6 +334,8 @@ export interface CaseDetail {
   referral: ReferralInfo | null;
   consultation: LiveConsultation | null;
   patient_history: PatientHistory | null;
+  patient_name?: string;
+  patient_profile?: PatientProfile | null;
 }
 
 export interface AuditEvent {
@@ -412,13 +434,25 @@ export const api = {
 
   getClinicInfo: () => request<ClinicInfo>('/api/clinic-info'),
 
-  startSession: (language: string, patientName = 'Patient', phone?: string) =>
+  createProfile: (name: string, age: string) =>
+    request<PatientProfile>('/api/patient/profile', {
+      method: 'POST',
+      body: JSON.stringify({ name, age }),
+    }),
+
+  getPatientHistory: (patientId: string) =>
+    request<{ history: PatientHistoryItem[] }>(`/api/patient/${patientId}/history`).then(
+      (r) => r.history
+    ),
+
+  startSession: (language: string, patientName = 'Patient', phone?: string, patientId?: string) =>
     request<PatientSession>('/api/patient/session', {
       method: 'POST',
       body: JSON.stringify({
         preferred_language: language,
         patient_name: patientName,
         phone: phone || undefined,
+        patient_id: patientId,
       }),
     }),
 

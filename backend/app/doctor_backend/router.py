@@ -113,6 +113,8 @@ async def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(
         raise HTTPException(status_code=404, detail="Case not found")
 
     prescription = db.get_prescription_for_case(case_id)
+    session = db.get_session(case.session_id)
+    patient = db.get_patient(case.patient_id)
 
     return {
         "case": case,
@@ -126,6 +128,8 @@ async def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(
         "referral": case.referral,
         "consultation": db.get_consultation(case.consultation_id) if case.consultation_id else None,
         "patient_history": await TriageService.build_patient_history(case),
+        "patient_name": patient.name if patient else (case.patient_name or (session.patient_name if session else "Patient")),
+        "patient_profile": patient.model_dump() if patient else None,
     }
 
 
