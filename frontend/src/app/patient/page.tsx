@@ -48,7 +48,7 @@ import {
   cx,
 } from '@/components/ui/clinical';
 
-type Phase = 'auth' | 'dashboard' | 'language' | 'conversation' | 'waiting' | 'prescription' | 'visit-report';
+type Phase = 'auth' | 'dashboard' | 'language' | 'conversation' | 'waiting' | 'prescription';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -104,7 +104,6 @@ export default function PatientPage() {
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [bookingAppointment, setBookingAppointment] = useState(false);
 
-  const [visitReport, setVisitReport] = useState<string | null>(null);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
 
   const speechRef = useRef<SpeechInput | null>(null);
@@ -191,7 +190,7 @@ export default function PatientPage() {
   /* --------------------------------------------------------- waiting poll */
 
   useEffect(() => {
-    if ((phase !== 'waiting' && phase !== 'visit-report') || !sessionId) return;
+    if (phase !== 'waiting' || !sessionId) return;
 
     let cancelled = false;
 
@@ -206,15 +205,6 @@ export default function PatientPage() {
         setRecommendAppointment(status.recommend_appointment);
         setRecommendedSpecialty(status.recommended_specialty);
         if (status.appointment) setAppointment(status.appointment);
-
-        // A completed in-person consultation shows a visit report right
-        // away, but polling continues afterward — the doctor may still be
-        // reviewing an auto-drafted prescription from that same
-        // consultation, which becomes available later on this same case.
-        if (status.visit_report_available && status.visit_report) {
-          setVisitReport(status.visit_report);
-          setPhase('visit-report');
-        }
 
         if (status.rejected) {
           setReviewRejected(true);
@@ -576,10 +566,6 @@ export default function PatientPage() {
             patientId={clinicalState?.patient_id ?? patientProfile?.patient_id ?? null}
             patientProfile={patientProfile}
           />
-        )}
-
-        {phase === 'visit-report' && visitReport && (
-          <VisitReportView report={visitReport} language={language} />
         )}
       </main>
     </div>
@@ -1146,29 +1132,6 @@ function WaitingRoom({
 
       <p className="mt-10 max-w-reading text-[13px] leading-relaxed text-ink-faint">
         Nothing has been prescribed yet. Only a doctor can issue your prescription.
-      </p>
-    </div>
-  );
-}
-
-/* ====================================================================== */
-
-function VisitReportView({ report, language }: { report: string; language: Language | null }) {
-  return (
-    <div className="animate-rise space-y-6">
-      <div>
-        <p className="label-meta text-risk-low">From your in-person visit</p>
-        <h1 className="mt-3 text-title font-semibold text-ink">Visit report</h1>
-      </div>
-      <p
-        className="max-w-reading whitespace-pre-wrap text-body leading-relaxed text-ink"
-        lang={language?.code}
-      >
-        {report}
-      </p>
-      <p className="border-t border-rule pt-6 text-[13px] leading-relaxed text-ink-faint">
-        This is a record of your consultation, not a prescription. If your doctor prescribed
-        anything during the visit, they will have given it to you directly.
       </p>
     </div>
   );

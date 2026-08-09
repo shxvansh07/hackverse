@@ -125,9 +125,9 @@ export interface LiveConsultation {
   patient_lang: string;
   status: 'IN_PROGRESS' | 'COMPLETED';
   turns: ConsultationTurn[];
+  /** English-only internal note. Never translated or shown to the patient —
+   *  it lives in the case record for the doctor (see CaseRecord). */
   report_en: string | null;
-  report_translated: string | null;
-  report_lang: string | null;
   started_at: string;
   ended_at: string | null;
 }
@@ -292,9 +292,23 @@ export interface PatientStatusResponse {
   recommend_appointment: boolean;
   recommended_specialty: string | null;
   appointment: Appointment | null;
-  visit_report_available: boolean;
-  visit_report: string | null;
-  visit_report_lang: string | null;
+}
+
+/** The permanent record of one patient encounter — initial conversation,
+ *  consultation transcript (if any), and the finalized prescription (if
+ *  any). Doctor-facing only; never sent to the patient. Shaped for reuse by
+ *  a future per-patient history feature: one of these per past case. */
+export interface CaseRecord {
+  case_id: string;
+  patient_id: string;
+  chief_complaint: string;
+  created_at: string;
+  finalized_at: string | null;
+  review_status: ReviewStatus;
+  initial_conversation: ChatMessage[];
+  consultation_transcript: ConsultationTurn[];
+  encounter_note: string | null;
+  prescription: Prescription | null;
 }
 
 export interface CaseDetail {
@@ -310,6 +324,7 @@ export interface CaseDetail {
   consultation: LiveConsultation | null;
   patient_name?: string;
   patient_profile?: PatientProfile | null;
+  record: CaseRecord;
 }
 
 export interface AuditEvent {

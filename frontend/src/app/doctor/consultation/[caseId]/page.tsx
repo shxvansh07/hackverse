@@ -322,21 +322,25 @@ export default function ConsultationPage() {
                   className="btn-primary mt-6"
                   title={consultation.turns.length === 0 ? 'Record at least one turn first' : undefined}
                 >
-                  {ending ? 'Generating report…' : 'End consultation & generate report'}
+                  {ending ? 'Generating draft prescription…' : 'End consultation & generate draft prescription'}
                 </button>
               </section>
             )}
 
             {consultation.status === 'COMPLETED' && (
               <section className="border-b border-rule py-6">
-                <SectionTitle note="English">Visit report</SectionTitle>
+                <SectionTitle note="English · Internal record">Encounter note</SectionTitle>
                 <p className="mt-3 max-w-reading text-[14px] leading-relaxed text-ink">
                   {consultation.report_en}
                 </p>
-                <p className="mt-4 text-[12px] text-ink-faint">
-                  A translated copy ({patientLang?.native_name ?? consultation.report_lang}) has been
-                  sent to the patient's session.
+                <p className="mt-4 max-w-reading text-[13px] leading-relaxed text-ink-muted">
+                  Saved to this case's record — never shown to the patient. A draft prescription
+                  has been generated from this consultation; review and release it from the case
+                  queue.
                 </p>
+                <Link href="/doctor" className="btn-secondary mt-3 inline-block">
+                  Back to case queue
+                </Link>
               </section>
             )}
 

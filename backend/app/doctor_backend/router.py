@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
+from app.services.record_service import RecordService
 from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
 from app.shared.database import db
 from app.shared.models import (
@@ -126,6 +127,7 @@ def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(requir
         "consultation": db.get_consultation(case.consultation_id) if case.consultation_id else None,
         "patient_name": patient.name if patient else (case.patient_name or (session.patient_name if session else "Patient")),
         "patient_profile": patient.model_dump() if patient else None,
+        "record": RecordService.build_case_record(case),
     }
 
 
