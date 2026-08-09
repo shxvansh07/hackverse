@@ -424,7 +424,7 @@ function CaseReview({
   onAddNote: (text: string) => Promise<void>;
 }) {
   const router = useRouter();
-  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation } = detail;
+  const { case: kase, prescription_draft: draft, safety_signal: safety, grounding, appointment, referral, consultation, record } = detail;
 
   const [notes, setNotes] = useState('');
   const [editing, setEditing] = useState(false);
@@ -959,10 +959,10 @@ function CaseReview({
             <p className="label-meta">Face-to-face consultation</p>
             <p className="mt-1 text-[13px] text-ink-muted">
               {consultation?.status === 'COMPLETED'
-                ? 'Completed — report generated.'
+                ? 'Completed — draft prescription generated for review.'
                 : consultation?.status === 'IN_PROGRESS'
                   ? 'In progress — resume on the doctor\'s device.'
-                  : 'For when the patient is here in person: real-time interpreted, scribed, ends in a report.'}
+                  : 'For when the patient is here in person: real-time interpreted, scribed, ends in a draft prescription for your review.'}
             </p>
           </div>
           <button
@@ -1036,28 +1036,80 @@ function CaseReview({
         </div>
       </section>
 
-      {/* -------------------------------------------------------- transcript */}
+      {/* ----------------------------------------------------------- record */}
       <section className="px-8 py-6">
-        <SectionTitle note={`${kase.transcript.length} turns`}>
-          Original conversation
-        </SectionTitle>
-        <ul className="mt-4 space-y-3">
-          {kase.transcript.map((message, index) => (
-            <li key={index} className="flex gap-3">
-              <span className="label-meta w-16 shrink-0 pt-1">
-                {message.sender === 'patient' ? 'Patient' : 'AI'}
-              </span>
-              <p
-                className={cx(
-                  'max-w-reading text-[14px] leading-relaxed',
-                  message.sender === 'patient' ? 'text-ink' : 'text-ink-muted',
-                )}
-              >
-                {message.text}
+        <SectionTitle note="Kept for continuity of care and audit">Case record</SectionTitle>
+
+        <div className="mt-4">
+          <h3 className="label-meta">Initial conversation</h3>
+          <ul className="mt-2 space-y-3">
+            {record.initial_conversation.map((message, index) => (
+              <li key={index} className="flex gap-3">
+                <span className="label-meta w-16 shrink-0 pt-1">
+                  {message.sender === 'patient' ? 'Patient' : 'AI'}
+                </span>
+                <p
+                  className={cx(
+                    'max-w-reading text-[14px] leading-relaxed',
+                    message.sender === 'patient' ? 'text-ink' : 'text-ink-muted',
+                  )}
+                >
+                  {message.text}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {record.consultation_transcript.length > 0 && (
+          <div className="mt-6 border-t border-rule pt-4">
+            <h3 className="label-meta">Face-to-face consultation</h3>
+            <ul className="mt-2 space-y-3">
+              {record.consultation_transcript.map((turn, index) => (
+                <li key={index} className="flex gap-3">
+                  <span className="label-meta w-16 shrink-0 pt-1">
+                    {turn.speaker === 'patient' ? 'Patient' : 'Doctor'}
+                  </span>
+                  <p className="max-w-reading text-[14px] leading-relaxed text-ink">
+                    {turn.speaker === 'doctor' ? turn.original_text : turn.translated_text}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {record.encounter_note && (
+          <div className="mt-6 border-t border-rule pt-4">
+            <h3 className="label-meta">Encounter note</h3>
+            <p className="mt-2 max-w-reading text-[14px] leading-relaxed text-ink">
+              {record.encounter_note}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-6 border-t border-rule pt-4">
+          <h3 className="label-meta">Prescription</h3>
+          {record.prescription ? (
+            <div className="mt-2">
+              <ul className="space-y-1">
+                {record.prescription.medications.map((med, index) => (
+                  <li key={index} className="text-[14px] text-ink">
+                    <span className="font-medium">{med.name}</span>{' '}
+                    <span className="font-mono text-[13px]">{med.dosage}</span> · {med.frequency} ·{' '}
+                    {med.duration}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[13px] text-ink-muted">
+                {record.prescription.status} · {record.prescription.doctor_name || 'doctor'}
+                {record.finalized_at && ` · ${new Date(record.finalized_at).toLocaleString()}`}
               </p>
-            </li>
-          ))}
-        </ul>
+            </div>
+          ) : (
+            <p className="mt-2 text-[13px] text-ink-faint">Not yet finalized.</p>
+          )}
+        </div>
       </section>
 
       {/* ------------------------------------------------ actions always visible */}

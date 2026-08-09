@@ -73,6 +73,17 @@ class ExtractedClinicalInfo(BaseModel):
         default=False,
         description="True only when the patient explicitly indicates they have nothing further to add.",
     )
+    denies_allergies: bool = Field(
+        default=False,
+        description="True only when the patient explicitly states they have NO allergies. "
+        "Distinct from allergies being empty because it was never asked — this is what lets "
+        "'no allergies' be recorded as a real, complete answer rather than a gap.",
+    )
+    denies_medical_history: bool = Field(
+        default=False,
+        description="True only when the patient explicitly states they have no ongoing "
+        "conditions or medical history. Same purpose as denies_allergies.",
+    )
 
     @field_validator("symptoms", "associated_symptoms", "medical_history", "medications", "allergies", "possible_red_flags", mode="before")
     @classmethod

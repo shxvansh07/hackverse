@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
+from app.services.record_service import RecordService
 from app.services.triage_service import TriageService
 from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
 from app.shared.database import db
@@ -130,6 +131,7 @@ async def get_doctor_case_detail(case_id: str, doctor: Dict[str, str] = Depends(
         "patient_history": await TriageService.build_patient_history(case),
         "patient_name": patient.name if patient else (case.patient_name or (session.patient_name if session else "Patient")),
         "patient_profile": patient.model_dump() if patient else None,
+        "record": RecordService.build_case_record(case),
     }
 
 

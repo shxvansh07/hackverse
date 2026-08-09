@@ -211,9 +211,9 @@ class LiveConsultation(BaseModel):
     patient_lang: str = "en"
     status: str = "IN_PROGRESS"  # "IN_PROGRESS" | "COMPLETED"
     turns: List[ConsultationTurn] = Field(default_factory=list)
+    #: English-only clinical note. Never translated or shown to the patient —
+    #: it lives in the case record for the doctor (see CaseRecord below).
     report_en: Optional[str] = None
-    report_translated: Optional[str] = None
-    report_lang: Optional[str] = None
     started_at: str = Field(default_factory=_now)
     ended_at: Optional[str] = None
 
@@ -283,6 +283,32 @@ class PatientProfile(BaseModel):
     name: str = ""
     age: str = ""
     created_at: str = Field(default_factory=_now)
+
+
+class CaseRecord(BaseModel):
+    """The permanent record of one patient encounter: what was said and what
+    was prescribed. Kept on the doctor's side for audit/liability, never sent
+    to the patient — the patient only ever receives the released prescription
+    itself, the same way the mild-case path already works.
+
+    Built from data that is already persisted elsewhere (case.transcript, a
+    LiveConsultation's turns, the case's Prescription); this model is just a
+    stable, self-contained shape for presenting it. It takes only a case to
+    build (see RecordService.build_case_record), so a future per-patient
+    history feature can assemble a list of these — one per past case — with
+    no redesign.
+    """
+
+    case_id: str
+    patient_id: str
+    chief_complaint: str
+    created_at: str
+    finalized_at: Optional[str] = None
+    review_status: ReviewStatus
+    initial_conversation: List[ChatMessage] = Field(default_factory=list)
+    consultation_transcript: List[ConsultationTurn] = Field(default_factory=list)
+    encounter_note: Optional[str] = None
+    prescription: Optional[Prescription] = None
 
 
 class PatientSession(BaseModel):
@@ -566,6 +592,3 @@ class PatientStatusResponse(BaseModel):
     recommend_appointment: bool = False
     recommended_specialty: Optional[str] = None
     appointment: Optional[Appointment] = None
-    visit_report_available: bool = False
-    visit_report: Optional[str] = None
-    visit_report_lang: Optional[str] = None

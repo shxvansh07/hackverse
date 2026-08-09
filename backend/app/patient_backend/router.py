@@ -265,9 +265,6 @@ def get_patient_status(session_id: str):
         and prescription.status == PrescriptionStatus.REJECTED
     )
 
-    consultation = db.get_consultation(case.consultation_id) if case.consultation_id else None
-    visit_report_available = bool(consultation and consultation.status == "COMPLETED")
-
     if release.allowed:
         message = "Your doctor has completed the review. Your prescription is ready."
     elif rejected:
@@ -296,9 +293,6 @@ def get_patient_status(session_id: str):
         recommend_appointment=case.triage_status in (RiskState.URGENT, RiskState.UNCERTAIN),
         recommended_specialty=case.recommended_specialty,
         appointment=db.get_appointment(case.appointment_id) if case.appointment_id else None,
-        visit_report_available=visit_report_available,
-        visit_report=consultation.report_translated if visit_report_available else None,
-        visit_report_lang=consultation.report_lang if visit_report_available else None,
     )
 
 

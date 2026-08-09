@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from app.ai.service import ai_service
 from app.safety import guards, specialty
@@ -101,7 +101,11 @@ class ConsultationService:
 
     @classmethod
     async def end(cls, consultation: LiveConsultation, case: TriageCase) -> LiveConsultation:
-        """Generate the English report, translate it for the patient, close out."""
+        """Generate the English encounter note for the case record, close out.
+
+        The note is never translated or sent to the patient — only the
+        eventual doctor-approved prescription reaches them (see _auto_draft).
+        """
         exchange_lines: List[str] = []
         for turn in consultation.turns:
             # English rendering of both sides: a doctor turn's original_text
@@ -112,19 +116,6 @@ class ConsultationService:
 
         report_en = await ai_service.generate_visit_report(case.summary_en, exchange_lines)
         consultation.report_en = report_en or "No report could be generated for this consultation."
-
-        report_translated: Optional[str] = consultation.report_en
-        if consultation.patient_lang != "en":
-            translated = await ai_service.translate_dialogue(
-                consultation.report_en, "en", consultation.patient_lang
-            )
-            if translated:
-                check = guards.verify_translation(consultation.report_en, translated)
-                if check.allowed:
-                    report_translated = translated
-
-        consultation.report_translated = report_translated
-        consultation.report_lang = consultation.patient_lang
         consultation.status = "COMPLETED"
         consultation.ended_at = datetime.now(timezone.utc).isoformat()
         db.save_consultation(consultation)
