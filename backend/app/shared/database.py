@@ -28,6 +28,7 @@ from app.shared.models import (
     Appointment,
     AuditEvent,
     ChatMessage,
+    Doctor,
     LiveConsultation,
     PatientSession,
     PatientStatus,
@@ -83,6 +84,10 @@ class ClinicalStore:
         #: normalized phone -> patient_id. The only mechanism by which a
         #: returning patient's new visit is linked to their past ones.
         self.phone_index: Dict[str, str] = {}
+        self.doctors: Dict[str, Doctor] = {}
+        #: lowercased username -> doctor_id. Usernames are case-insensitive
+        #: on login; this is the only place that decision is encoded.
+        self.doctor_username_index: Dict[str, str] = {}
 
         self._persist = persist and os.getenv("PERSIST_STATE", "1") != "0"
         self._lock = threading.RLock()
@@ -92,6 +97,17 @@ class ClinicalStore:
         elif seed_demo and os.getenv("SEED_DEMO_DATA", "1") != "0":
             self._seed_demo()
             self._save()
+
+        # Doctor accounts are configured identities, not demo content — seed
+        # whenever the store starts genuinely empty of them (a fresh store,
+        # or a restored snapshot written before doctor accounts existed),
+        # regardless of whether SEED_DEMO_DATA produced the rest of the demo
+        # data. Extra demo doctors (beyond the one from env vars) are only
+        # added when demo seeding is actually on.
+        if not self.doctors:
+            self._seed_doctors(
+                include_demo_extras=seed_demo and os.getenv("SEED_DEMO_DATA", "1") != "0"
+            )
 
     # ------------------------------------------------------------ file paths
 
@@ -118,6 +134,8 @@ class ClinicalStore:
             "consultations": {k: v.model_dump() for k, v in self.consultations.items()},
             "phone_index": dict(self.phone_index),
             "patients": {k: v.model_dump() for k, v in self.patients.items()},
+            "doctors": {k: v.model_dump() for k, v in self.doctors.items()},
+            "doctor_username_index": dict(self.doctor_username_index),
         }
         target = self._state_path()
         try:
@@ -163,16 +181,21 @@ class ClinicalStore:
                 k: PatientProfile.model_validate(v)
                 for k, v in payload.get("patients", {}).items()
             }
+            self.doctors = {
+                k: Doctor.model_validate(v) for k, v in payload.get("doctors", {}).items()
+            }
+            self.doctor_username_index = dict(payload.get("doctor_username_index", {}))
             logger.info(
-                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations, %d patients",
+                "Restored %d sessions, %d cases, %d prescriptions, %d appointments, %d consultations, %d patients, %d doctors",
                 len(self.sessions), len(self.cases), len(self.prescriptions),
-                len(self.appointments), len(self.consultations), len(self.patients)
+                len(self.appointments), len(self.consultations), len(self.patients), len(self.doctors)
             )
         except Exception as exc:  # noqa: BLE001 - a bad snapshot must not block boot
             logger.error("State snapshot incompatible, starting empty: %s", exc)
             self.sessions, self.cases, self.prescriptions = {}, {}, {}
             self.appointments, self.consultations, self.patients = {}, {}, {}
             self.phone_index = {}
+            self.doctors, self.doctor_username_index = {}, {}
 
     # ----------------------------------------------------------------- audit
 
@@ -253,6 +276,20 @@ class ClinicalStore:
             self._save()
         return patient
 
+    def save_doctor(self, doctor: Doctor) -> Doctor:
+        with self._lock:
+            self.doctors[doctor.doctor_id] = doctor
+            self.doctor_username_index[doctor.username.strip().lower()] = doctor.doctor_id
+            self._save()
+        return doctor
+
+    def get_doctor(self, doctor_id: str) -> Optional[Doctor]:
+        return self.doctors.get(doctor_id)
+
+    def get_doctor_by_username(self, username: str) -> Optional[Doctor]:
+        doctor_id = self.doctor_username_index.get((username or "").strip().lower())
+        return self.doctors.get(doctor_id) if doctor_id else None
+
     # -------------------------------------------------------------- queries
 
     def get_session(self, session_id: str) -> Optional[PatientSession]:
@@ -260,6 +297,20 @@ class ClinicalStore:
 
     def get_patient(self, patient_id: str) -> Optional[PatientProfile]:
         return self.patients.get(patient_id)
+
+    def is_known_patient_id(self, patient_id: str) -> bool:
+        """Whether patient_id was actually issued by this store — either a
+        registered profile or a phone-linked guest identity — rather than an
+        arbitrary client-supplied string. See TriageService.create_session,
+        the only caller: a session-creation request's patient_id is
+        client-controlled (the frontend reads it back from localStorage),
+        and nothing upstream of this check has ever verified it was
+        legitimately issued rather than forged or stale."""
+        if not patient_id:
+            return False
+        if patient_id in self.patients:
+            return True
+        return patient_id in self.phone_index.values()
 
     def get_case(self, case_id: str) -> Optional[TriageCase]:
         return self.cases.get(case_id)
@@ -285,6 +336,37 @@ class ClinicalStore:
             self.phone_index[normalized] = patient_id
             self._save()
             return patient_id
+
+    def resolve_profile_patient_id(self, phone: str) -> str:
+        """The patient_id a *new* named-profile registration should use for
+        the given phone — see patient_backend.router.create_patient_profile,
+        the only caller.
+
+        Three cases:
+        - No phone, or phone never seen before: a fresh id (also links the
+          phone to it, so a future phone-only guest visit finds this profile).
+        - Phone already links to an id with no profile yet (prior guest
+          visits): reuse that id — this *is* the merge, safe because there's
+          no other real identity attached to it yet, and it makes the
+          guest's case history the new profile's history for free.
+        - Phone already links to an id that already has its own profile:
+          deliberately do not merge two distinct registered identities (e.g.
+          a shared family phone) — a fresh id, and this phone number's
+          existing link is left untouched.
+        """
+        normalized = normalize_phone(phone)
+        if not normalized:
+            return _new_patient_id()
+        with self._lock:
+            existing = self.phone_index.get(normalized)
+            if not existing:
+                patient_id = _new_patient_id()
+                self.phone_index[normalized] = patient_id
+                self._save()
+                return patient_id
+            if self.patients.get(existing) is None:
+                return existing
+            return _new_patient_id()
 
     def get_cases_by_patient(
         self, patient_id: str, exclude_case_id: Optional[str] = None, handed_off_only: bool = True,
@@ -328,6 +410,81 @@ class ClinicalStore:
             return self.consultations.get(case.consultation_id)
         return None
 
+    def check_integrity(self) -> List[str]:
+        """Verify every cross-entity reference this store holds actually
+        resolves, and resolves both ways where the relationship is meant to
+        be bidirectional (a case pointing at a prescription that itself
+        points back at a different case would be silent data corruption).
+
+        Nothing here ever deletes entities, so a violation can only mean a
+        bug wrote a bad id somewhere — this exists to catch that, not to
+        handle routine deletion (there isn't any).
+        """
+        problems: List[str] = []
+
+        for case in self.cases.values():
+            if case.session_id not in self.sessions:
+                problems.append(f"{case.case_id}: session_id {case.session_id} does not exist")
+
+            if case.prescription_id:
+                prescription = self.prescriptions.get(case.prescription_id)
+                if prescription is None:
+                    problems.append(
+                        f"{case.case_id}: prescription_id {case.prescription_id} does not exist"
+                    )
+                elif prescription.case_id != case.case_id:
+                    problems.append(
+                        f"{case.case_id}: prescription {case.prescription_id} points back at "
+                        f"{prescription.case_id} instead"
+                    )
+
+            if case.appointment_id:
+                appointment = self.appointments.get(case.appointment_id)
+                if appointment is None:
+                    problems.append(
+                        f"{case.case_id}: appointment_id {case.appointment_id} does not exist"
+                    )
+                elif appointment.case_id != case.case_id:
+                    problems.append(
+                        f"{case.case_id}: appointment {case.appointment_id} points back at "
+                        f"{appointment.case_id} instead"
+                    )
+
+            if case.consultation_id:
+                consultation = self.consultations.get(case.consultation_id)
+                if consultation is None:
+                    problems.append(
+                        f"{case.case_id}: consultation_id {case.consultation_id} does not exist"
+                    )
+                elif consultation.case_id != case.case_id:
+                    problems.append(
+                        f"{case.case_id}: consultation {case.consultation_id} points back at "
+                        f"{consultation.case_id} instead"
+                    )
+
+        for prescription in self.prescriptions.values():
+            if prescription.case_id not in self.cases:
+                problems.append(
+                    f"prescription {prescription.prescription_id}: case_id "
+                    f"{prescription.case_id} does not exist"
+                )
+
+        for consultation in self.consultations.values():
+            if consultation.case_id not in self.cases:
+                problems.append(
+                    f"consultation {consultation.consultation_id}: case_id "
+                    f"{consultation.case_id} does not exist"
+                )
+
+        for appointment in self.appointments.values():
+            if appointment.case_id not in self.cases:
+                problems.append(
+                    f"appointment {appointment.appointment_id}: case_id "
+                    f"{appointment.case_id} does not exist"
+                )
+
+        return problems
+
     def list_cases(
         self, risk_filter: Optional[str] = None, status_filter: Optional[str] = None,
     ) -> List[TriageCase]:
@@ -348,7 +505,14 @@ class ClinicalStore:
         return urgent + routine
 
     def reset(self) -> None:
-        """Test helper. Clears memory without touching the audit file."""
+        """Test helper. Clears memory without touching the audit file.
+
+        Doctor accounts are cleared and re-seeded (rather than left alone)
+        so every test starts from the same known registry — tests that
+        register their own doctor never leak into a later test, and
+        auth_headers() can still always log into the baseline env-var
+        account afterwards.
+        """
         with self._lock:
             self.sessions.clear()
             self.cases.clear()
@@ -358,8 +522,44 @@ class ClinicalStore:
             self.patients.clear()
             self.audit.clear()
             self.phone_index.clear()
+            self.doctors.clear()
+            self.doctor_username_index.clear()
+            self._seed_doctors(include_demo_extras=False)
 
     # ----------------------------------------------------------- demo seeds
+
+    def _seed_doctors(self, include_demo_extras: bool) -> None:
+        """The env-var account (DOCTOR_USERNAME/DOCTOR_PASSWORD/DOCTOR_ID/
+        DOCTOR_NAME) always exists — it's the operator's configured account,
+        documented in .env, and every existing demo flow/credential set
+        depends on it still working unchanged. include_demo_extras adds a
+        couple more so a live demo shows multiple real doctor accounts
+        without a live signup step.
+        """
+        from app.shared.auth import hash_password  # local import avoids a load-time cycle
+
+        def _seed(doctor_id: str, username: str, password: str, name: str, qualification: str, registration_no: str) -> None:
+            if username.strip().lower() in self.doctor_username_index:
+                return
+            password_hash, password_salt = hash_password(password)
+            self.doctors[doctor_id] = Doctor(
+                doctor_id=doctor_id, username=username, password_hash=password_hash,
+                password_salt=password_salt, name=name, qualification=qualification,
+                registration_no=registration_no,
+            )
+            self.doctor_username_index[username.strip().lower()] = doctor_id
+
+        _seed(
+            os.getenv("DOCTOR_ID", "DR-101"),
+            os.getenv("DOCTOR_USERNAME", "doctor"),
+            os.getenv("DOCTOR_PASSWORD", "doctorpassword123"),
+            os.getenv("DOCTOR_NAME", "Dr. Sharma, MD"),
+            "MBBS, MD (General Medicine)", "KMC/00000/2026",
+        )
+        if include_demo_extras:
+            _seed("DR-102", "dr.mehta", "demopassword123", "Dr. Mehta, MD", "MBBS, MD (Pediatrics)", "KMC/00001/2026")
+            _seed("DR-103", "dr.rao", "demopassword123", "Dr. Rao, MD", "MBBS, DM (Cardiology)", "KMC/00002/2026")
+        self._save()
 
     def _seed_demo(self) -> None:
         """Two cases so the doctor dashboard is never empty on first load.

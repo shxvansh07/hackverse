@@ -21,7 +21,7 @@ from app.services.case_service import CaseService
 from app.services.prescription_service import PrescriptionService
 from app.services.triage_service import TriageService
 from app.shared import clinic
-from app.shared.database import db
+from app.shared.database import db, normalize_phone
 from app.shared.languages import all_languages, is_supported, resolve
 from app.shared.models import (
     Appointment,
@@ -75,10 +75,16 @@ def get_clinic_info():
 
 @router.post("/api/patient/profile", response_model=PatientProfile)
 def create_patient_profile(payload: CreateProfileRequest):
-    profile = PatientProfile(
-        name=payload.name,
-        age=payload.age,
-    )
+    """Registering a profile with a phone that was already used for guest
+    (phone-only, no account) visits reuses that same patient_id — see
+    database.resolve_profile_patient_id — so the guest's prior case history
+    becomes this profile's history without touching any case record."""
+    kwargs: dict = {"name": payload.name, "age": payload.age}
+    if payload.phone:
+        kwargs["phone"] = payload.phone
+        kwargs["patient_id"] = db.resolve_profile_patient_id(payload.phone)
+
+    profile = PatientProfile(**kwargs)
     db.save_patient(profile)
     return profile
 

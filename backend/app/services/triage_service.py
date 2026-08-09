@@ -94,7 +94,18 @@ class TriageService:
         language = resolve(preferred_language)
 
         # An explicit patient_id (from a prior POST /api/patient/profile
-        # registration) is the strongest identity signal — honour it as-is.
+        # registration) is the strongest identity signal — honour it, but
+        # only once verified against the store. This value is client-
+        # supplied (the frontend reads it back from localStorage) and
+        # nothing before this point has ever checked it was actually issued
+        # by this app rather than forged, stale, or a typo — trusting it
+        # blindly would let one client see another patient's carried-forward
+        # history just by supplying their id. An unrecognized id is treated
+        # exactly as if none were supplied, falling through to the phone
+        # path below.
+        if patient_id and not db.is_known_patient_id(patient_id):
+            patient_id = None
+
         # Otherwise a phone number links this visit to any past ones by the
         # same patient (see database.get_or_create_patient_id). Left blank,
         # this behaves exactly as before phone-based identity existed: a

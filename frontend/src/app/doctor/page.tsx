@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   ApiError,
   api,
@@ -254,6 +255,12 @@ export default function DoctorDashboard() {
             />
             {live ? 'Live' : 'Reconnecting'}
           </span>
+          <Link
+            href="/doctor/trends"
+            className="text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
+          >
+            Trends
+          </Link>
           <span className="text-[13px] text-ink-muted">{api.doctorName()}</span>
           <button
             onClick={() => {

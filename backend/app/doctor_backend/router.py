@@ -14,9 +14,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from app.safety import guards
 from app.services.case_service import CaseService
 from app.services.consultation_service import ConsultationService
+from app.services.public_health_service import PublicHealthService
 from app.services.record_service import RecordService
 from app.services.triage_service import TriageService
-from app.shared.auth import AccountLockedError, authenticate, require_doctor, resolve_token
+from app.shared.auth import (
+    AccountLockedError,
+    DuplicateUsernameError,
+    authenticate,
+    register_doctor,
+    require_doctor,
+    resolve_token,
+)
 from app.shared.database import db
 from app.shared.models import (
     AddCaseNoteRequest,
@@ -28,10 +36,12 @@ from app.shared.models import (
     DoctorDecisionResponse,
     DoctorLoginRequest,
     DoctorLoginResponse,
+    DoctorRegisterRequest,
     LiveConsultation,
     Prescription,
     PrescriptionStatus,
     PrescriptionUpdateRequest,
+    PublicHealthTrendsResponse,
     ReviewStatus,
     StartConsultationRequest,
     TriageCase,
@@ -59,6 +69,29 @@ def doctor_login(payload: DoctorLoginRequest):
         )
     if not record:
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    return DoctorLoginResponse(**record)
+
+
+@router.post("/api/auth/doctor/register", response_model=DoctorLoginResponse)
+def doctor_register(payload: DoctorRegisterRequest):
+    """Open registration — same openness as POST /api/patient/profile. A
+    hackathon clinic doesn't gate who can hold a doctor account behind an
+    admin step; it does still require every account to have its own
+    credentials, which is the actual "multiple doctors" requirement."""
+    try:
+        register_doctor(
+            payload.username, payload.password, payload.name,
+            payload.qualification, payload.registration_no,
+        )
+    except DuplicateUsernameError:
+        raise HTTPException(status_code=409, detail="That username is already taken")
+
+    record = authenticate(payload.username, payload.password)
+    if not record:
+        # Only reachable if authenticate's own lockout state somehow blocks
+        # the account that was just created — vanishingly unlikely, but
+        # fail loudly rather than return a 200 with no usable token.
+        raise HTTPException(status_code=500, detail="Account created but sign-in failed")
     return DoctorLoginResponse(**record)
 
 
@@ -287,6 +320,26 @@ def get_case_audit(case_id: str, doctor: Dict[str, str] = Depends(require_doctor
     if not db.get_case(case_id):
         raise HTTPException(status_code=404, detail="Case not found")
     return {"case_id": case_id, "events": db.audit_for_case(case_id)}
+
+
+@router.get("/api/doctor/public-health/trends", response_model=PublicHealthTrendsResponse)
+def get_public_health_trends(
+    days: int = Query(14, ge=1, le=90),
+    doctor: Dict[str, str] = Depends(require_doctor),
+):
+    """Anonymized, day-bucketed symptom counts — see PublicHealthService for
+    the aggregation and anonymization rules. No case_id, patient_id, or
+    transcript content ever appears in the response."""
+    return PublicHealthService.compute_trends(days=days)
+
+
+@router.get("/api/doctor/integrity")
+def get_data_integrity(doctor: Dict[str, str] = Depends(require_doctor)):
+    """Cross-entity reference audit — see ClinicalStore.check_integrity.
+    An empty `problems` list means every case/prescription/appointment/
+    consultation reference in the store resolves and points back correctly."""
+    problems = db.check_integrity()
+    return {"clean": not problems, "problems": problems}
 
 
 # --------------------------------------------------------------------------

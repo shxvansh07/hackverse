@@ -282,6 +282,11 @@ class PatientProfile(BaseModel):
     patient_id: str = Field(default_factory=lambda: _new_id("PAT", 6))
     name: str = ""
     age: str = ""
+    #: Optional, and separate from the identity-linking phone number stored
+    #: in database.phone_index — this is display/contact info on the
+    #: profile itself. See patient_backend.router.create_patient_profile for
+    #: how a matching phone_index entry gets linked or reused at signup.
+    phone: str = ""
     created_at: str = Field(default_factory=_now)
 
 
@@ -442,6 +447,7 @@ class CreateSessionRequest(BaseModel):
 class CreateProfileRequest(BaseModel):
     name: str = Field(..., min_length=1)
     age: str = Field(..., min_length=1)
+    phone: Optional[str] = None
 
 
 class TriageMessageRequest(BaseModel):
@@ -503,6 +509,29 @@ class DoctorLoginResponse(BaseModel):
     doctor_id: str
     doctor_name: str
     expires_at: str
+
+
+class Doctor(BaseModel):
+    """A real doctor account. password_hash/password_salt only — the plain
+    password is never stored, never logged, never round-tripped through the
+    API (see app.shared.auth.hash_password/verify_password)."""
+
+    doctor_id: str = Field(default_factory=lambda: _new_id("DR", 4))
+    username: str
+    password_hash: str
+    password_salt: str
+    name: str
+    qualification: str = ""
+    registration_no: str = ""
+    created_at: str = Field(default_factory=_now)
+
+
+class DoctorRegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8)
+    name: str = Field(..., min_length=1)
+    qualification: str = ""
+    registration_no: str = ""
 
 
 class BookAppointmentRequest(BaseModel):
@@ -609,3 +638,37 @@ class PatientStatusResponse(BaseModel):
     recommend_appointment: bool = False
     recommended_specialty: Optional[str] = None
     appointment: Optional[Appointment] = None
+
+
+class SymptomTrendPoint(BaseModel):
+    date: str
+    count: int
+
+
+class SymptomTrend(BaseModel):
+    """One symptom's aggregate case counts over the lookback window.
+
+    Anonymized by construction — see PublicHealthService.compute_trends,
+    which is the only place a SymptomTrend is built. No case_id, patient_id,
+    or free text ever appears here; a symptom this thin is dropped by the
+    MIN_BUCKET_COUNT floor before it ever reaches this model.
+    """
+
+    symptom: str
+    total_count: int
+    daily_counts: List[SymptomTrendPoint] = Field(default_factory=list)
+    baseline_avg: float = 0.0
+    recent_count: int = 0
+    ratio: Optional[float] = None
+    flagged: bool = False
+    #: True when there isn't enough baseline history yet to compute a
+    #: trustworthy ratio (e.g. a same-day demo). ratio/flagged are then
+    #: meaningless placeholders, never a guess dressed up as a signal.
+    insufficient_history: bool = True
+
+
+class PublicHealthTrendsResponse(BaseModel):
+    generated_at: str
+    window_days: int
+    min_bucket_count: int
+    trends: List[SymptomTrend] = Field(default_factory=list)

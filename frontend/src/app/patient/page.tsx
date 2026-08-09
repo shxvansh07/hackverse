@@ -58,6 +58,7 @@ export default function PatientPage() {
   const [history, setHistory] = useState<PatientHistoryItem[]>([]);
   const [authName, setAuthName] = useState('');
   const [authAge, setAuthAge] = useState('');
+  const [authPhone, setAuthPhone] = useState('');
   const [authError, setAuthError] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   const [languages, setLanguages] = useState<Language[]>([]);
@@ -168,7 +169,7 @@ export default function PatientPage() {
     setLoadingAuth(true);
     setAuthError('');
     try {
-      const profile = await api.createProfile(authName.trim(), authAge.trim());
+      const profile = await api.createProfile(authName.trim(), authAge.trim(), authPhone.trim());
       window.localStorage.setItem('patient_profile', JSON.stringify(profile));
       setPatientProfile(profile);
       setPhase('dashboard');
@@ -457,8 +458,10 @@ export default function PatientPage() {
       <AuthPhase
         name={authName}
         age={authAge}
+        phone={authPhone}
         onNameChange={setAuthName}
         onAgeChange={setAuthAge}
+        onPhoneChange={setAuthPhone}
         onSubmit={handleCreateProfile}
         loading={loadingAuth}
         error={authError}
@@ -1532,16 +1535,20 @@ function PrescriptionView({
 function AuthPhase({
   name,
   age,
+  phone,
   onNameChange,
   onAgeChange,
+  onPhoneChange,
   onSubmit,
   loading,
   error,
 }: {
   name: string;
   age: string;
+  phone: string;
   onNameChange: (v: string) => void;
   onAgeChange: (v: string) => void;
+  onPhoneChange: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   loading: boolean;
   error: string;
@@ -1553,7 +1560,7 @@ function AuthPhase({
         <p className="text-body text-ink-muted mb-8">
           Please enter your details to create a profile and save your consultations.
         </p>
-        
+
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-ink mb-1">Name</label>
@@ -1575,7 +1582,19 @@ function AuthPhase({
               placeholder="e.g. 35"
             />
           </div>
-          
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">
+              Phone number (optional)
+            </label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => onPhoneChange(e.target.value)}
+              className="w-full rounded border border-rule bg-surface px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
+              placeholder="For linking any past visits — skip if you'd rather not share it"
+            />
+          </div>
+
           {error && <div className="text-red-500 text-sm">{error}</div>}
           
           <button
