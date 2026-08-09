@@ -106,30 +106,47 @@ export class SpeechInput {
  *  session — the list loads asynchronously and `getVoices()` doesn't wait for
  *  it. Calling speak() before that load finishes silently picks no voice at
  *  all, which is why a page's very first utterance can be inaudible even
- *  though every later one works fine. Resolved once, cached, reused. */
-let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null;
+ *  though every later one works fine.
+ *
+ *  This only tracks READINESS (a boolean), not the voice list itself — the
+ *  actual `SpeechSynthesisVoice[]` is re-fetched fresh on every speak() call
+ *  below. Caching and reusing the same voice *objects* across calls is a
+ *  separate, nastier bug: on some Chromium builds a previously-used
+ *  `SpeechSynthesisVoice` reference silently stops producing audio on reuse
+ *  — especially for non-default/network voices — while the platform default
+ *  voice keeps working regardless because it never needs an explicit
+ *  `utterance.voice` assignment. That is exactly why a Hindi doctor-side
+ *  voice could speak once and then go silent while English kept working: the
+ *  stale object was the problem, not the language. */
+let voicesLoaded = false;
+let voicesLoadedPromise: Promise<void> | null = null;
 
-function loadVoices(): Promise<SpeechSynthesisVoice[]> {
-  if (!isSynthesisSupported()) return Promise.resolve([]);
+function ensureVoicesLoaded(): Promise<void> {
+  if (!isSynthesisSupported()) return Promise.resolve();
 
-  const existing = window.speechSynthesis.getVoices();
-  if (existing.length > 0) return Promise.resolve(existing);
+  if (voicesLoaded || window.speechSynthesis.getVoices().length > 0) {
+    voicesLoaded = true;
+    return Promise.resolve();
+  }
 
-  if (!voicesReady) {
-    voicesReady = new Promise((resolve) => {
+  if (!voicesLoadedPromise) {
+    voicesLoadedPromise = new Promise((resolve) => {
       const onChange = () => {
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
+        if (window.speechSynthesis.getVoices().length > 0) {
           window.speechSynthesis.removeEventListener('voiceschanged', onChange);
-          resolve(voices);
+          voicesLoaded = true;
+          resolve();
         }
       };
       window.speechSynthesis.addEventListener('voiceschanged', onChange);
       // Some browsers never fire voiceschanged reliably; don't wait forever.
-      setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
+      setTimeout(() => {
+        voicesLoaded = true;
+        resolve();
+      }, 1000);
     });
   }
-  return voicesReady;
+  return voicesLoadedPromise;
 }
 
 /** Speak text aloud. Resolves to whether a voice matching `languageTag` was
@@ -146,7 +163,9 @@ export async function speak(text: string, languageTag: string): Promise<boolean>
   utterance.rate = 0.95; // slightly slow: this is clinical instruction, not chat
   utterance.pitch = 1;
 
-  const voices = await loadVoices();
+  await ensureVoicesLoaded();
+  // Fetched fresh, not cached — see the note above.
+  const voices = window.speechSynthesis.getVoices();
   const base = languageTag.split('-')[0];
   const match =
     voices.find((v) => v.lang === languageTag) ||
