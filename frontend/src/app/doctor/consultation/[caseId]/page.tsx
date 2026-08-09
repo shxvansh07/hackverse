@@ -45,6 +45,7 @@ export default function ConsultationPage() {
 
   const [activeSpeaker, setActiveSpeaker] = useState<ActiveSpeaker>(null);
   const [interim, setInterim] = useState('');
+  const [voiceWarning, setVoiceWarning] = useState<string | null>(null);
 
   const speechRef = useRef<SpeechInput | null>(null);
   const finalTextRef = useRef('');
@@ -118,7 +119,12 @@ export default function ConsultationPage() {
           targetLang,
         });
         setConsultation((prev) => (prev ? { ...prev, turns: [...prev.turns, turn] } : prev));
-        speak(turn.translated_text, targetTag);
+        const spoken = await speak(turn.translated_text, targetTag);
+        setVoiceWarning(
+          spoken
+            ? null
+            : `No spoken voice is installed on this device for ${targetTag} — the translation above is text-only.`,
+        );
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Could not translate that turn.');
       }
@@ -139,6 +145,7 @@ export default function ConsultationPage() {
       speechRef.current.stop();
       finalTextRef.current = '';
       setInterim('');
+      setVoiceWarning(null);
 
       const languageTag = speaker === 'doctor' ? englishLang.speech_tag : patientLang.speech_tag;
 
@@ -302,6 +309,10 @@ export default function ConsultationPage() {
                     Spoken playback is not supported in this browser — translations will still
                     appear below as text.
                   </p>
+                )}
+
+                {voiceWarning && (
+                  <p className="mt-3 text-[12px] text-risk-uncertain">{voiceWarning}</p>
                 )}
 
                 <button

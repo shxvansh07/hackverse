@@ -102,9 +102,42 @@ export class SpeechInput {
   }
 }
 
-/** Speak text aloud. No-op where synthesis or a matching voice is unavailable. */
-export function speak(text: string, languageTag: string): void {
-  if (!isSynthesisSupported() || !text.trim()) return;
+/** Chrome (and others) return an empty voice list on the first call in a page
+ *  session — the list loads asynchronously and `getVoices()` doesn't wait for
+ *  it. Calling speak() before that load finishes silently picks no voice at
+ *  all, which is why a page's very first utterance can be inaudible even
+ *  though every later one works fine. Resolved once, cached, reused. */
+let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null;
+
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  if (!isSynthesisSupported()) return Promise.resolve([]);
+
+  const existing = window.speechSynthesis.getVoices();
+  if (existing.length > 0) return Promise.resolve(existing);
+
+  if (!voicesReady) {
+    voicesReady = new Promise((resolve) => {
+      const onChange = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          window.speechSynthesis.removeEventListener('voiceschanged', onChange);
+          resolve(voices);
+        }
+      };
+      window.speechSynthesis.addEventListener('voiceschanged', onChange);
+      // Some browsers never fire voiceschanged reliably; don't wait forever.
+      setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
+    });
+  }
+  return voicesReady;
+}
+
+/** Speak text aloud. Resolves to whether a voice matching `languageTag` was
+ *  actually found — callers that need to know playback might have been
+ *  inaudible (e.g. no voice installed for that language) can check this
+ *  instead of assuming silence means success. */
+export async function speak(text: string, languageTag: string): Promise<boolean> {
+  if (!isSynthesisSupported() || !text.trim()) return false;
 
   window.speechSynthesis.cancel();
 
@@ -113,14 +146,21 @@ export function speak(text: string, languageTag: string): void {
   utterance.rate = 0.95; // slightly slow: this is clinical instruction, not chat
   utterance.pitch = 1;
 
-  const voices = window.speechSynthesis.getVoices();
+  const voices = await loadVoices();
   const base = languageTag.split('-')[0];
   const match =
     voices.find((v) => v.lang === languageTag) ||
     voices.find((v) => v.lang.startsWith(base));
   if (match) utterance.voice = match;
+  else if (voices.length > 0) {
+    // Voices did load — there just isn't one for this language. Speaking
+    // anyway would use whatever default voice Chrome falls back to, which
+    // usually can't render non-Latin script and produces no audible output.
+    console.warn(`No speech voice available for "${languageTag}". Playback may be silent.`);
+  }
 
   window.speechSynthesis.speak(utterance);
+  return Boolean(match);
 }
 
 export function stopSpeaking(): void {
