@@ -130,7 +130,7 @@ export default function PatientPage() {
   /* --------------------------------------------------------- waiting poll */
 
   useEffect(() => {
-    if (phase !== 'waiting' || !sessionId) return;
+    if ((phase !== 'waiting' && phase !== 'visit-report') || !sessionId) return;
 
     let cancelled = false;
 
@@ -146,13 +146,13 @@ export default function PatientPage() {
         setRecommendedSpecialty(status.recommended_specialty);
         if (status.appointment) setAppointment(status.appointment);
 
-        // A completed in-person consultation is the most recent, most
-        // complete outcome available — it takes priority over the async
-        // prescription track, which a case may or may not also have.
+        // A completed in-person consultation shows a visit report right
+        // away, but polling continues afterward — the doctor may still be
+        // reviewing an auto-drafted prescription from that same
+        // consultation, which becomes available later on this same case.
         if (status.visit_report_available && status.visit_report) {
           setVisitReport(status.visit_report);
           setPhase('visit-report');
-          return;
         }
 
         if (status.rejected) {
