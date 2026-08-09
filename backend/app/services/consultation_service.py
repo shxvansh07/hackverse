@@ -10,7 +10,10 @@ chat-intake path uses (see case_service.CaseService.finalise_assessment).
 A doctor being physically present is supervision of the conversation, not a
 substitute for that gate — a patient describing something URGENT mid-visit
 must not silently receive a drafted medication list just because they were
-seen in person rather than triaged async.
+seen in person rather than triaged async. The extraction step that runs
+first can surface exactly that kind of new information: it reads the live
+dialogue itself, not just what intake already knew, so the risk picture can
+genuinely change here.
 """
 
 from __future__ import annotations
