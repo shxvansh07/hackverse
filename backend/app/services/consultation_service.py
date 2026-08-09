@@ -14,8 +14,11 @@ from typing import List, Optional
 
 from app.ai.service import ai_service
 from app.safety import guards
+from app.services.case_service import CaseService
+from app.services.triage_service import TriageService
 from app.shared.database import db
-from app.shared.models import ConsultationTurn, LiveConsultation, TriageCase
+from app.shared.models import ConsultationTurn, LiveConsultation, ReviewStatus, TriageCase
+from app.websocket.manager import WSEvent, case_queue_payload, ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -117,4 +120,30 @@ class ConsultationService:
             "CONSULTATION_ENDED", case_id=case.case_id, actor="doctor",
             detail=f"Consultation {consultation.consultation_id} closed with {len(consultation.turns)} turns",
         )
+
+        await cls._auto_draft(case, exchange_lines)
+
         return consultation
+
+    @classmethod
+    async def _auto_draft(cls, case: TriageCase, exchange_lines: List[str]) -> None:
+        """Extract facts from the finished transcript and draft a prescription."""
+        extracted = await ai_service.extract_from_consultation(exchange_lines)
+        if extracted is not None:
+            TriageService.merge_extraction(case, extracted)
+
+        if case.prescription_id is not None:
+            return
+
+        prescription = await CaseService._generate_draft(case)
+        case.review_status = ReviewStatus.NEW if prescription is not None else ReviewStatus.NEEDS_REVIEW
+        db.save_case(case)
+
+        db.record_audit(
+            "CONSULTATION_DRAFT_GENERATED" if prescription is not None else "CONSULTATION_DRAFT_BLOCKED",
+            case_id=case.case_id, actor="system",
+            detail="Draft prescription generated from consultation transcript"
+            if prescription is not None else "Draft blocked (allergy conflict) after consultation",
+        )
+
+        await ws_manager.broadcast(WSEvent.CASE_CREATED, case_queue_payload(case))
