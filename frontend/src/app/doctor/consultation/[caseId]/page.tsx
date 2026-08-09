@@ -268,7 +268,7 @@ export default function ConsultationPage() {
                   <button
                     type="button"
                     onClick={() => toggleSpeaker('doctor')}
-                    disabled={!speechSupported}
+                    disabled={!speechSupported || (activeSpeaker !== null && activeSpeaker !== 'doctor')}
                     aria-pressed={activeSpeaker === 'doctor'}
                     className={cx(
                       'border px-4 py-5 text-left transition-colors disabled:opacity-50',
@@ -289,7 +289,10 @@ export default function ConsultationPage() {
                   <button
                     type="button"
                     onClick={() => toggleSpeaker('patient')}
-                    disabled={!speechSupported || !patientLang}
+                    disabled={
+                      !speechSupported || !patientLang ||
+                      (activeSpeaker !== null && activeSpeaker !== 'patient')
+                    }
                     aria-pressed={activeSpeaker === 'patient'}
                     className={cx(
                       'border px-4 py-5 text-left transition-colors disabled:opacity-50',

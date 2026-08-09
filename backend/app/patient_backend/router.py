@@ -21,7 +21,7 @@ from app.services.case_service import CaseService
 from app.services.prescription_service import PrescriptionService
 from app.services.triage_service import TriageService
 from app.shared import clinic
-from app.shared.database import db
+from app.shared.database import db, normalize_phone
 from app.shared.languages import all_languages, is_supported, resolve
 from app.shared.models import (
     Appointment,
@@ -75,10 +75,16 @@ def get_clinic_info():
 
 @router.post("/api/patient/profile", response_model=PatientProfile)
 def create_patient_profile(payload: CreateProfileRequest):
-    profile = PatientProfile(
-        name=payload.name,
-        age=payload.age,
-    )
+    """Registering a profile with a phone that was already used for guest
+    (phone-only, no account) visits reuses that same patient_id — see
+    database.resolve_profile_patient_id — so the guest's prior case history
+    becomes this profile's history without touching any case record."""
+    kwargs: dict = {"name": payload.name, "age": payload.age}
+    if payload.phone:
+        kwargs["phone"] = payload.phone
+        kwargs["patient_id"] = db.resolve_profile_patient_id(payload.phone)
+
+    profile = PatientProfile(**kwargs)
     db.save_patient(profile)
     return profile
 
@@ -88,13 +94,14 @@ def get_patient_history(patient_id: str):
     patient = db.get_patient(patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient profile not found")
-        
+
+    # handed_off_only (the default) excludes a case still mid-conversation or
+    # abandoned — same principle db.get_cases_by_patient's other callers rely
+    # on: an incomplete chat is not a completed visit, and listing it as
+    # "history" would be misleading on the patient's own dashboard.
     history = []
-    # Find all cases for this patient
-    patient_cases = [c for c in db.cases.values() if c.patient_id == patient_id]
-    # Sort by descending creation date
-    patient_cases.sort(key=lambda c: c.created_at if hasattr(c, 'created_at') else c.case_id, reverse=True)
-    
+    patient_cases = db.get_cases_by_patient(patient_id)
+
     for case in patient_cases:
         item = {
             "case_id": case.case_id,

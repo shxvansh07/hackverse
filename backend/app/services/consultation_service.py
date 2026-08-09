@@ -4,16 +4,18 @@ One shared device, used together by doctor and patient in the room. Each
 utterance is captured, translated, and spoken back — always as an explicit,
 already-decided routing outcome's follow-up, never a routing decision itself.
 
-_auto_draft() is the one exception: at the end of a consultation it re-runs
-the same deterministic safety assessment and drafting gate the async
-chat-intake path uses (see case_service.CaseService.finalise_assessment).
-A doctor being physically present is supervision of the conversation, not a
-substitute for that gate — a patient describing something URGENT mid-visit
-must not silently receive a drafted medication list just because they were
-seen in person rather than triaged async. The extraction step that runs
-first can surface exactly that kind of new information: it reads the live
-dialogue itself, not just what intake already knew, so the risk picture can
-genuinely change here.
+_auto_draft() deliberately does NOT gate drafting on the deterministic
+risk_state the way the async chat-intake path does (see
+case_service.CaseService.finalise_assessment). A case only reaches a live
+consultation after a doctor has already examined the patient in person —
+that examination is the supervision an async URGENT/UNCERTAIN gate exists to
+require, so re-applying it here would mostly just re-detect whatever
+originally sent the patient to this visit (it never leaves case.symptoms or
+the intake transcript) and permanently block drafting for exactly the cases
+this path is meant to serve. The safety assessment still runs and updates
+the case's record (triage_status, red_flags, recommended_specialty), but its
+result is informational here, not a gate. The real safety gate for this path
+is the doctor's own Approve/Modify — nothing reaches the patient without it.
 """
 
 from __future__ import annotations
@@ -135,8 +137,13 @@ class ConsultationService:
 
     @classmethod
     async def _auto_draft(cls, case: TriageCase, exchange_lines: List[str]) -> None:
-        """Extract facts from the finished transcript, re-assess risk, and
-        draft a prescription only if that assessment still permits one.
+        """Extract facts from the finished transcript and draft a prescription.
+
+        Always attempts to draft — see the module docstring for why this
+        does not gate on risk_state the way the async intake path does. The
+        assessment still runs so the case's record (triage_status, red_flags,
+        recommended_specialty) reflects reality; only the allergy-conflict
+        guard inside _generate_draft can still block the draft itself.
         """
         extracted = await ai_service.extract_from_consultation(exchange_lines)
         if extracted is not None:
@@ -177,23 +184,8 @@ class ConsultationService:
 
         hints = extracted.possible_red_flags if extracted is not None else ()
         assessment = TriageService.assess_case(case, latest_text="", llm_hints=hints)
-        gate = guards.may_generate_draft(assessment)
-
-        if not gate.allowed:
-            case.review_status = (
-                ReviewStatus.URGENT if assessment.risk_state == RiskState.URGENT
-                else ReviewStatus.NEEDS_REVIEW
-            )
-            if assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN):
-                case.recommended_specialty = specialty.recommend_specialty(assessment.red_flag_codes)
-            db.save_case(case)
-            db.record_audit(
-                "CONSULTATION_DRAFT_BLOCKED", case_id=case.case_id, actor="system",
-                detail=f"Draft blocked after consultation: {gate.reason}",
-                metadata={"details": gate.details},
-            )
-            await ws_manager.broadcast(WSEvent.CASE_CREATED, case_queue_payload(case))
-            return
+        if assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN):
+            case.recommended_specialty = specialty.recommend_specialty(assessment.red_flag_codes)
 
         prescription = await CaseService._generate_draft(case)
         case.review_status = ReviewStatus.NEW if prescription is not None else ReviewStatus.NEEDS_REVIEW

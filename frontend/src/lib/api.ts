@@ -234,6 +234,7 @@ export interface PatientProfile {
   patient_id: string;
   name: string;
   age: string;
+  phone?: string;
   created_at: string;
 }
 
@@ -247,6 +248,21 @@ export interface PatientHistoryItem {
   consultation_id: string | null;
   has_prescription: boolean;
   has_consultation: boolean;
+}
+
+/** A de-identified peer case surfaced as decision support — clinical content
+ *  and doctor attribution only, never patient identity. See backend
+ *  RecordService.find_similar_cases. */
+export interface SimilarCase {
+  similarity_score: number;
+  chief_complaint: string;
+  diagnosis: string;
+  medications: string[];
+  doctor_name: string;
+  doctor_years_experience: number | null;
+  was_modified_from_ai_draft: boolean;
+  doctor_notes: string | null;
+  approved_at: string | null;
 }
 
 export interface PatientSession {
@@ -372,6 +388,29 @@ export interface DecisionResponse {
   message: string;
 }
 
+export interface SymptomTrendPoint {
+  date: string;
+  count: number;
+}
+
+export interface SymptomTrend {
+  symptom: string;
+  total_count: number;
+  daily_counts: SymptomTrendPoint[];
+  baseline_avg: number;
+  recent_count: number;
+  ratio: number | null;
+  flagged: boolean;
+  insufficient_history: boolean;
+}
+
+export interface PublicHealthTrendsResponse {
+  generated_at: string;
+  window_days: number;
+  min_bucket_count: number;
+  trends: SymptomTrend[];
+}
+
 /** Error carrying the HTTP status so callers can distinguish 409 from 500. */
 export class ApiError extends Error {
   constructor(
@@ -449,10 +488,10 @@ export const api = {
 
   getClinicInfo: () => request<ClinicInfo>('/api/clinic-info'),
 
-  createProfile: (name: string, age: string) =>
+  createProfile: (name: string, age: string, phone?: string) =>
     request<PatientProfile>('/api/patient/profile', {
       method: 'POST',
-      body: JSON.stringify({ name, age }),
+      body: JSON.stringify({ name, age, phone: phone || undefined }),
     }),
 
   getPatientHistory: (patientId: string) =>
@@ -526,9 +565,41 @@ export const api = {
   async doctorLogin(username: string, password: string) {
     const data = await request<{
       token: string; doctor_id: string; doctor_name: string; expires_at: string;
+      years_experience: number | null;
     }>('/api/auth/doctor/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
+    });
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(TOKEN_KEY, data.token);
+      window.localStorage.setItem(NAME_KEY, data.doctor_name);
+    }
+    return data;
+  },
+
+  async doctorRegister(fields: {
+    username: string;
+    password: string;
+    name: string;
+    qualification?: string;
+    registrationNo?: string;
+    yearsExperience?: number;
+    specialty?: string;
+  }) {
+    const data = await request<{
+      token: string; doctor_id: string; doctor_name: string; expires_at: string;
+      years_experience: number | null;
+    }>('/api/auth/doctor/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: fields.username,
+        password: fields.password,
+        name: fields.name,
+        qualification: fields.qualification || '',
+        registration_no: fields.registrationNo || '',
+        years_experience: fields.yearsExperience || 0,
+        specialty: fields.specialty || '',
+      }),
     });
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(TOKEN_KEY, data.token);
@@ -558,6 +629,9 @@ export const api = {
 
   getCaseDetail: (caseId: string) =>
     request<CaseDetail>(`/api/doctor/cases/${caseId}`, {}, true),
+
+  getPublicHealthTrends: (days = 14) =>
+    request<PublicHealthTrendsResponse>(`/api/doctor/public-health/trends?days=${days}`, {}, true),
 
   addCaseNote: (caseId: string, text: string) =>
     request<CaseNote>(

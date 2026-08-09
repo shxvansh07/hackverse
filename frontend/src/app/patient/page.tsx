@@ -58,6 +58,7 @@ export default function PatientPage() {
   const [history, setHistory] = useState<PatientHistoryItem[]>([]);
   const [authName, setAuthName] = useState('');
   const [authAge, setAuthAge] = useState('');
+  const [authPhone, setAuthPhone] = useState('');
   const [authError, setAuthError] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
   const [languages, setLanguages] = useState<Language[]>([]);
@@ -97,6 +98,7 @@ export default function PatientPage() {
   const [prescription, setPrescription] = useState<PresentedPrescription | null>(null);
   const [prescriptionLang, setPrescriptionLang] = useState<string>('en');
   const [loadingPrescription, setLoadingPrescription] = useState(false);
+  const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
   const [reviewRejected, setReviewRejected] = useState(false);
 
   const [recommendAppointment, setRecommendAppointment] = useState(false);
@@ -168,7 +170,7 @@ export default function PatientPage() {
     setLoadingAuth(true);
     setAuthError('');
     try {
-      const profile = await api.createProfile(authName.trim(), authAge.trim());
+      const profile = await api.createProfile(authName.trim(), authAge.trim(), authPhone.trim());
       window.localStorage.setItem('patient_profile', JSON.stringify(profile));
       setPatientProfile(profile);
       setPhase('dashboard');
@@ -186,6 +188,20 @@ export default function PatientPage() {
     setHistory([]);
     setPhase('auth');
   };
+
+  // The only way back to the dashboard from language/conversation/waiting/
+  // prescription — without this, a patient could only see an updated
+  // history list (e.g. a visit they just finished) via a full page reload.
+  // The in-progress case itself is already saved server-side on every
+  // message, so leaving it here loses no data.
+  const goToDashboard = useCallback(() => {
+    stopSpeaking();
+    speechRef.current?.stop();
+    setListening(false);
+    setSpeaking(false);
+    setPhase('dashboard');
+    if (patientProfile) loadHistory(patientProfile.patient_id);
+  }, [patientProfile]);
 
   /* --------------------------------------------------------- waiting poll */
 
@@ -240,6 +256,12 @@ export default function PatientPage() {
     setLanguage(selectedLang);
     setError(null);
     setPhase('conversation');
+    // Cleared explicitly — otherwise a rejection or appointment from a prior
+    // visit under this same profile would still be showing (WaitingRoom
+    // checks `rejected` before anything else) once this new case reaches
+    // the waiting phase, even though it hasn't been near a doctor yet.
+    setReviewRejected(false);
+    setAppointment(null);
 
     try {
       const session = await api.startSession(
@@ -443,8 +465,10 @@ export default function PatientPage() {
       <AuthPhase
         name={authName}
         age={authAge}
+        phone={authPhone}
         onNameChange={setAuthName}
         onAgeChange={setAuthAge}
+        onPhoneChange={setAuthPhone}
         onSubmit={handleCreateProfile}
         loading={loadingAuth}
         error={authError}
@@ -457,14 +481,21 @@ export default function PatientPage() {
       <DashboardPhase
         profile={patientProfile!}
         history={history}
+        loadingPrescription={loadingPrescription}
+        prescriptionError={prescriptionError}
         onStart={() => setPhase('language')}
         onLogout={handleLogout}
         onViewPrescription={(prescriptionId) => {
           setLoadingPrescription(true);
+          setPrescriptionError(null);
           api.getPrescription(prescriptionId, 'en').then((p) => {
             setPrescription(p);
             setPrescriptionLang('en');
             setPhase('prescription');
+          }).catch((err) => {
+            setPrescriptionError(
+              err instanceof ApiError ? err.message : 'Could not load the prescription.',
+            );
           }).finally(() => setLoadingPrescription(false));
         }}
       />
@@ -486,9 +517,20 @@ export default function PatientPage() {
     <div className="min-h-screen bg-paper print:min-h-0 print:bg-white">
       <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 py-3">
-          <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
-            Clinical Assistant
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="text-[13px] font-semibold tracking-tight text-ink">
+              Clinical Assistant
+            </Link>
+            {patientProfile && (
+              <button
+                type="button"
+                onClick={goToDashboard}
+                className="text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink"
+              >
+                My dashboard
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             {risk !== 'UNCERTAIN' && <RiskBadge risk={risk} size="sm" />}
             <span className="label-meta">{language?.native_name}</span>
@@ -1519,16 +1561,20 @@ function PrescriptionView({
 function AuthPhase({
   name,
   age,
+  phone,
   onNameChange,
   onAgeChange,
+  onPhoneChange,
   onSubmit,
   loading,
   error,
 }: {
   name: string;
   age: string;
+  phone: string;
   onNameChange: (v: string) => void;
   onAgeChange: (v: string) => void;
+  onPhoneChange: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   loading: boolean;
   error: string;
@@ -1571,6 +1617,26 @@ function AuthPhase({
               />
             </label>
 
+            <label className="block">
+              <span className="eyebrow">Phone number (optional)</span>
+              <input
+                type="tel"
+                inputMode="tel"
+                value={phone}
+                onChange={(e) => onPhoneChange(e.target.value)}
+                className="field mt-2"
+                placeholder="Links any past visits"
+                autoComplete="tel"
+              />
+              {/* Said plainly and next to the field rather than buried in a
+                  placeholder, because this one is genuinely optional and the
+                  patient is being asked to hand over an identifier. */}
+              <span className="mt-1.5 block text-[12px] leading-relaxed text-ink-faint">
+                Used only to link this visit to your past ones. Skip it if you
+                would rather not share it.
+              </span>
+            </label>
+
             {/* Semantic risk token rather than a raw Tailwind red: this
                 interface reserves colour for meaning, and an ad-hoc red here
                 would sit a shade away from every other error on screen. */}
@@ -1598,12 +1664,16 @@ function AuthPhase({
 function DashboardPhase({
   profile,
   history,
+  loadingPrescription,
+  prescriptionError,
   onStart,
   onLogout,
   onViewPrescription,
 }: {
   profile: PatientProfile;
   history: PatientHistoryItem[];
+  loadingPrescription: boolean;
+  prescriptionError: string | null;
   onStart: () => void;
   onLogout: () => void;
   onViewPrescription: (id: string) => void;
@@ -1666,12 +1736,20 @@ function DashboardPhase({
                   </div>
 
                   {item.has_prescription && item.prescription_id && (
-                    <button
-                      onClick={() => onViewPrescription(item.prescription_id!)}
-                      className="btn-secondary btn-sm mt-4"
-                    >
-                      View prescription
-                    </button>
+                    <div className="mt-4">
+                      <button
+                        onClick={() => onViewPrescription(item.prescription_id!)}
+                        disabled={loadingPrescription}
+                        className="btn-secondary btn-sm"
+                      >
+                        {loadingPrescription ? 'Loading…' : 'View prescription'}
+                      </button>
+                      {prescriptionError && (
+                        <p role="alert" className="mt-2 text-[13px] leading-relaxed text-risk-urgent">
+                          {prescriptionError}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </li>
               ))}

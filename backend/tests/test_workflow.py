@@ -9,6 +9,7 @@ safety properties must still hold.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -298,6 +299,79 @@ def test_first_time_patient_has_no_history_context():
     _, case_id = _complete_low_risk_intake()
     case = db.get_case(case_id)
     assert "history_context" not in case.grounding
+
+
+def test_similar_past_cases_surface_across_different_patients():
+    """Two unrelated (no phone, no shared profile) patients with a similar,
+    finalized presentation should show up as decision support on a third
+    similar case — the cross-patient counterpart to history_context, which
+    only ever looks at one patient's own past visits."""
+    headers = auth_headers()
+
+    _, case1_id = _complete_low_risk_intake()
+    approve1 = client.post(
+        f"/api/doctor/cases/{case1_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve1.status_code == 200
+
+    _, case2_id = _complete_low_risk_intake()
+    approve2 = client.post(
+        f"/api/doctor/cases/{case2_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve2.status_code == 200
+
+    _, case3_id = _complete_low_risk_intake()
+    case1 = db.get_case(case1_id)
+    case3 = db.get_case(case3_id)
+    assert case1.patient_id != case3.patient_id  # genuinely different patients
+
+    similar = case3.grounding.get("similar_cases")
+    assert similar
+    for entry in similar:
+        # Never patient identity — only clinical content and doctor attribution.
+        assert "patient_id" not in entry
+        assert "patient_name" not in entry
+        assert entry["diagnosis"]
+        assert entry["doctor_name"]
+
+
+def test_similar_cases_excludes_the_same_patient():
+    """A patient's own prior visits must never appear in their own
+    similar_cases — that's history_context's job, not this one's."""
+    phone = "9876500099"
+    _, case1_id = _complete_low_risk_intake_with_phone(phone, symptom="fever")
+    headers = auth_headers()
+    approve = client.post(
+        f"/api/doctor/cases/{case1_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve.status_code == 200
+
+    _, case2_id = _complete_low_risk_intake_with_phone(phone, symptom="fever")
+    case2 = db.get_case(case2_id)
+    # No OTHER patient has a matching finalized case in this clean store, so
+    # the only possible match would be the same patient's own prior visit —
+    # which must be excluded, leaving similar_cases empty.
+    assert not case2.grounding.get("similar_cases")
+
+
+def test_login_returns_the_real_account_identity():
+    """Login reflects the actual registered account, including the
+    self-reported years_experience/specialty used for SimilarCase
+    attribution — no directory selector, no per-login identity choice."""
+    resp = client.post(
+        "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["doctor_id"] == "DR-101"
+    assert body["doctor_name"] == "Dr. Sharma, MD"
+    assert body["years_experience"] == 14
 
 
 def test_approved_prescription_reaches_the_patient():
@@ -770,13 +844,14 @@ def test_only_handed_off_cases_appear_in_queue():
 # Live consultation safety gate
 # ---------------------------------------------------------------------------
 
-def test_urgent_case_never_receives_a_prescription_via_live_consultation():
-    """A doctor being physically present for a live consultation is
-    supervision of the conversation, not a substitute for the same drafting
-    gate the async chat-intake path always applies. A case already flagged
-    URGENT by the async intake must not silently receive a drafted
-    medication list just because it went through an in-person consultation
-    instead of the normal /api/triage/assess path."""
+def test_urgent_case_drafts_after_live_consultation_but_is_not_released():
+    """A completed live consultation means a doctor has already examined the
+    patient in person — that is the supervision an async URGENT/UNCERTAIN
+    gate exists to require, so it does not re-apply here. A case originally
+    flagged URGENT by the async intake DOES get a draft after its
+    consultation ends, ready for the doctor to review. What still must not
+    happen is the patient receiving anything before that doctor explicitly
+    approves or modifies it — that release gate is untouched."""
     session_id = start_session("en")
     send(session_id, "I have severe chest pain and cannot breathe")
     case = db.get_case_by_session(session_id)
@@ -793,9 +868,14 @@ def test_urgent_case_never_receives_a_prescription_via_live_consultation():
     assert resp.status_code == 200
 
     case = db.get_case(case.case_id)
-    assert case.prescription_id is None
-    assert db.get_prescription_for_case(case.case_id) is None
-    assert case.review_status == "URGENT"
+    assert case.prescription_id is not None
+    prescription = db.get_prescription_for_case(case.case_id)
+    assert prescription is not None
+    assert case.review_status == "NEW"
+
+    # Still not visible to the patient until a doctor decides.
+    status = client.get(f"/api/patient/status/{session_id}").json()
+    assert status["prescription_available"] is False
 
 
 def test_low_risk_case_receives_a_draft_via_live_consultation_alone():
@@ -1008,3 +1088,227 @@ def test_returning_patient_case_detail_includes_visit_history():
     # structured visit list must still be present even when the optional
     # highlight isn't.
     assert history["highlight"] is None
+
+
+# ---------------------------------------------------------------------------
+# Public health trends (anonymized symptom aggregation)
+# ---------------------------------------------------------------------------
+
+def _iso_for_days_ago(days_ago: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+
+def _seed_case(symptom: str, days_ago: int, *, handed_off: bool = True) -> None:
+    """A bare, directly-constructed case for aggregation tests — no chat
+    needed, mirrors the direct-field-assignment pattern other tests in this
+    file already use (e.g. test_returning_patient_case_detail_includes_visit_history)."""
+    session_id = start_session("en")
+    case = db.get_case_by_session(session_id)
+    case.symptoms = [symptom]
+    case.chief_complaint = symptom
+    case.handed_off = handed_off
+    case.created_at = _iso_for_days_ago(days_ago)
+    db.save_case(case)
+
+
+def test_public_health_trends_requires_doctor_auth():
+    resp = client.get("/api/doctor/public-health/trends")
+    assert resp.status_code == 401
+
+
+def test_public_health_trends_suppresses_low_counts():
+    """Fewer than MIN_BUCKET_COUNT (3) total cases for a symptom in the
+    window is too thin to aggregate anonymously — must not appear at all."""
+    _seed_case("rare symptom", days_ago=0)
+    _seed_case("rare symptom", days_ago=0)  # only 2 total
+
+    body = client.get("/api/doctor/public-health/trends", headers=auth_headers()).json()
+    symptoms = [t["symptom"] for t in body["trends"]]
+    assert "rare symptom" not in symptoms
+
+
+def test_public_health_trends_excludes_non_handed_off_cases():
+    """A session still mid-conversation (never reviewed by a doctor) must
+    not contribute to a public aggregate signal — same privacy boundary
+    database.list_cases() already enforces for the doctor queue."""
+    for _ in range(5):
+        _seed_case("abandoned symptom", days_ago=0, handed_off=False)
+
+    body = client.get("/api/doctor/public-health/trends", headers=auth_headers()).json()
+    symptoms = [t["symptom"] for t in body["trends"]]
+    assert "abandoned symptom" not in symptoms
+
+
+def test_public_health_trends_flags_a_real_spike():
+    """A symptom with a real multi-day baseline, then a clear spike today,
+    must be flagged with a correctly computed ratio — the actual signal
+    this feature exists to surface."""
+    for days_ago in (3, 2, 1):
+        _seed_case("cough", days_ago=days_ago)  # baseline: 1/day for 3 days
+    for _ in range(6):
+        _seed_case("cough", days_ago=0)  # today: 6 — a clear spike
+
+    body = client.get("/api/doctor/public-health/trends", headers=auth_headers()).json()
+    trend = next(t for t in body["trends"] if t["symptom"] == "cough")
+    assert trend["insufficient_history"] is False
+    assert trend["baseline_avg"] == 1.0
+    assert trend["recent_count"] == 6
+    assert trend["ratio"] == 6.0
+    assert trend["flagged"] is True
+
+
+def test_public_health_trends_marks_insufficient_history_when_no_baseline():
+    """A same-day-only dataset (the common case for a fresh deployment or a
+    live demo) has no real baseline to compare against — must be reported
+    as raw counts with insufficient_history=True, never a fabricated ratio
+    that only looks like a signal."""
+    for _ in range(4):
+        _seed_case("fever", days_ago=0)
+
+    body = client.get("/api/doctor/public-health/trends", headers=auth_headers()).json()
+    trend = next(t for t in body["trends"] if t["symptom"] == "fever")
+    assert trend["insufficient_history"] is True
+    assert trend["ratio"] is None
+    assert trend["flagged"] is False
+    assert trend["total_count"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Data integrity checker + forged patient_id rejection
+# ---------------------------------------------------------------------------
+
+def test_data_integrity_is_clean_on_a_normal_flow():
+    session_id, case_id = _complete_low_risk_intake()
+    client.post("/api/cases", json={"session_id": session_id})
+    assert db.check_integrity() == []
+
+
+def test_data_integrity_reports_a_deliberate_dangling_reference():
+    _, case_id = _complete_low_risk_intake()
+    case = db.get_case(case_id)
+    case.prescription_id = "RX-DOES-NOT-EXIST"
+    db.save_case(case)
+
+    problems = db.check_integrity()
+    assert any("RX-DOES-NOT-EXIST" in p for p in problems)
+
+
+def test_forged_patient_id_is_not_trusted():
+    """A client-supplied patient_id that was never actually issued by this
+    app (not a registered profile, not a phone-linked guest id) must be
+    ignored rather than silently accepted — otherwise one client could see
+    another patient's carried-forward history just by guessing/reusing an
+    id string."""
+    resp = client.post(
+        "/api/patient/session",
+        json={"preferred_language": "en", "patient_id": "PAT-FORGED-000000"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["patient_id"] != "PAT-FORGED-000000"
+
+
+def test_legitimate_patient_id_is_still_honoured():
+    profile = client.post(
+        "/api/patient/profile", json={"name": "Asha", "age": "40"}
+    ).json()
+    resp = client.post(
+        "/api/patient/session",
+        json={"preferred_language": "en", "patient_id": profile["patient_id"]},
+    )
+    assert resp.json()["patient_id"] == profile["patient_id"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-doctor accounts
+# ---------------------------------------------------------------------------
+
+def test_seeded_env_doctor_still_logs_in():
+    """The pre-existing single-account demo credentials must keep working
+    unchanged now that auth is backed by a real registry."""
+    resp = client.post(
+        "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["doctor_id"] == "DR-101"
+
+
+def test_doctor_can_register_and_then_login():
+    register = client.post(
+        "/api/auth/doctor/register",
+        json={"username": "dr.newperson", "password": "a-real-password", "name": "Dr. New Person"},
+    )
+    assert register.status_code == 200
+    assert register.json()["doctor_name"] == "Dr. New Person"
+
+    login = client.post(
+        "/api/auth/doctor/login",
+        json={"username": "dr.newperson", "password": "a-real-password"},
+    )
+    assert login.status_code == 200
+    assert login.json()["doctor_id"] == register.json()["doctor_id"]
+
+
+def test_duplicate_doctor_username_rejected():
+    fields = {"username": "dr.dupe", "password": "a-real-password", "name": "Dr. Dupe"}
+    first = client.post("/api/auth/doctor/register", json=fields)
+    assert first.status_code == 200
+
+    second = client.post("/api/auth/doctor/register", json=fields)
+    assert second.status_code == 409
+
+
+def test_two_doctors_case_notes_are_attributed_to_the_right_one():
+    client.post(
+        "/api/auth/doctor/register",
+        json={"username": "dr.second", "password": "a-real-password", "name": "Dr. Second Doctor"},
+    )
+    second_headers = {
+        "Authorization": f"Bearer {client.post('/api/auth/doctor/login', json={'username': 'dr.second', 'password': 'a-real-password'}).json()['token']}"
+    }
+
+    _, case_id = _complete_low_risk_intake()
+    client.post(f"/api/doctor/cases/{case_id}/notes", json={"text": "First doctor's note"}, headers=auth_headers())
+    client.post(f"/api/doctor/cases/{case_id}/notes", json={"text": "Second doctor's note"}, headers=second_headers)
+
+    case = db.get_case(case_id)
+    assert case.case_notes[0].doctor_id == "DR-101"
+    assert case.case_notes[1].doctor_name == "Dr. Second Doctor"
+    assert case.case_notes[0].doctor_id != case.case_notes[1].doctor_id
+
+
+# ---------------------------------------------------------------------------
+# Patient identity merge at profile registration
+# ---------------------------------------------------------------------------
+
+def test_guest_visit_history_merges_into_a_later_profile_by_phone():
+    """A guest (phone-linked, no account) visits, then later registers a
+    named profile with that same phone — the new profile must reuse the
+    guest's existing patient_id, not mint a disconnected new one, so the
+    guest visit still shows up as history."""
+    phone = "9123456780"
+    guest_session = client.post(
+        "/api/patient/session", json={"preferred_language": "en", "phone": phone}
+    ).json()
+    guest_case = db.get_case_by_session(guest_session["session_id"])
+    guest_case.handed_off = True
+    guest_case.chief_complaint = "cough"
+    db.save_case(guest_case)
+
+    profile = client.post(
+        "/api/patient/profile", json={"name": "Rahul", "age": "29", "phone": phone}
+    ).json()
+
+    assert profile["patient_id"] == guest_session["patient_id"]
+    history = client.get(f"/api/patient/{profile['patient_id']}/history").json()["history"]
+    assert any(h["chief_complaint"] == "cough" for h in history)
+
+
+def test_two_people_sharing_a_phone_are_not_merged():
+    phone = "9123456781"
+    first = client.post(
+        "/api/patient/profile", json={"name": "Person One", "age": "30", "phone": phone}
+    ).json()
+    second = client.post(
+        "/api/patient/profile", json={"name": "Person Two", "age": "55", "phone": phone}
+    ).json()
+    assert first["patient_id"] != second["patient_id"]
