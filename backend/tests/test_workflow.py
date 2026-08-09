@@ -548,3 +548,35 @@ def test_only_handed_off_cases_appear_in_queue():
     """A patient mid-conversation is not a case a doctor should see."""
     start_session("en")
     assert client.get("/api/doctor/cases", headers=auth_headers()).json() == []
+
+
+# ---------------------------------------------------------------------------
+# Live consultation safety gate
+# ---------------------------------------------------------------------------
+
+def test_urgent_case_never_receives_a_prescription_via_live_consultation():
+    """A doctor being physically present for a live consultation is
+    supervision of the conversation, not a substitute for the same drafting
+    gate the async chat-intake path always applies. A case already flagged
+    URGENT by the async intake must not silently receive a drafted
+    medication list just because it went through an in-person consultation
+    instead of the normal /api/triage/assess path."""
+    session_id = start_session("en")
+    send(session_id, "I have severe chest pain and cannot breathe")
+    case = db.get_case_by_session(session_id)
+    assert case.triage_status == "URGENT"
+
+    headers = auth_headers()
+    consultation = client.post(
+        "/api/doctor/consultations/start", json={"case_id": case.case_id}, headers=headers,
+    ).json()
+
+    resp = client.post(
+        f"/api/doctor/consultations/{consultation['consultation_id']}/end", headers=headers,
+    )
+    assert resp.status_code == 200
+
+    case = db.get_case(case.case_id)
+    assert case.prescription_id is None
+    assert db.get_prescription_for_case(case.case_id) is None
+    assert case.review_status == "URGENT"

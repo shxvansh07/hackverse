@@ -3,7 +3,14 @@
 One shared device, used together by doctor and patient in the room. Each
 utterance is captured, translated, and spoken back — always as an explicit,
 already-decided routing outcome's follow-up, never a routing decision itself.
-Nothing here reads or writes triage_status/red_flags/safety_signal.
+
+_auto_draft() is the one exception: at the end of a consultation it re-runs
+the same deterministic safety assessment and drafting gate the async
+chat-intake path uses (see case_service.CaseService.finalise_assessment).
+A doctor being physically present is supervision of the conversation, not a
+substitute for that gate — a patient describing something URGENT mid-visit
+must not silently receive a drafted medication list just because they were
+seen in person rather than triaged async.
 """
 
 from __future__ import annotations
@@ -13,11 +20,17 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.ai.service import ai_service
-from app.safety import guards
+from app.safety import guards, specialty
 from app.services.case_service import CaseService
 from app.services.triage_service import TriageService
 from app.shared.database import db
-from app.shared.models import ConsultationTurn, LiveConsultation, ReviewStatus, TriageCase
+from app.shared.models import (
+    ConsultationTurn,
+    LiveConsultation,
+    ReviewStatus,
+    RiskState,
+    TriageCase,
+)
 from app.websocket.manager import WSEvent, case_queue_payload, ws_manager
 
 logger = logging.getLogger(__name__)
@@ -127,12 +140,34 @@ class ConsultationService:
 
     @classmethod
     async def _auto_draft(cls, case: TriageCase, exchange_lines: List[str]) -> None:
-        """Extract facts from the finished transcript and draft a prescription."""
+        """Extract facts from the finished transcript, re-assess risk, and
+        draft a prescription only if that assessment still permits one.
+        """
         extracted = await ai_service.extract_from_consultation(exchange_lines)
         if extracted is not None:
             TriageService.merge_extraction(case, extracted)
 
         if case.prescription_id is not None:
+            return
+
+        hints = extracted.possible_red_flags if extracted is not None else ()
+        assessment = TriageService.assess_case(case, latest_text="", llm_hints=hints)
+        gate = guards.may_generate_draft(assessment)
+
+        if not gate.allowed:
+            case.review_status = (
+                ReviewStatus.URGENT if assessment.risk_state == RiskState.URGENT
+                else ReviewStatus.NEEDS_REVIEW
+            )
+            if assessment.risk_state in (RiskState.URGENT, RiskState.UNCERTAIN):
+                case.recommended_specialty = specialty.recommend_specialty(assessment.red_flag_codes)
+            db.save_case(case)
+            db.record_audit(
+                "CONSULTATION_DRAFT_BLOCKED", case_id=case.case_id, actor="system",
+                detail=f"Draft blocked after consultation: {gate.reason}",
+                metadata={"details": gate.details},
+            )
+            await ws_manager.broadcast(WSEvent.CASE_CREATED, case_queue_payload(case))
             return
 
         prescription = await CaseService._generate_draft(case)

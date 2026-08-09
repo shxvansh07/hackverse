@@ -53,6 +53,174 @@
       "topic": "Antihistamine counselling",
       "icd10": "J30.9",
       "text": "Sedating and partially sedating antihistamines such as cetirizine and levocetirizine are taken at bedtime to limit daytime drowsiness. Patients must be counselled to avoid driving and operating machinery. Dose reduction is required in renal impairment and in elderly patients."
+    },
+    {
+      "id": "GUID-009",
+      "topic": "Empiric antibiotic choice in uncomplicated cystitis",
+      "icd10": "N39.0",
+      "text": "Uncomplicated cystitis in a non-pregnant adult without fever or flank pain is treated empirically with nitrofurantoin, avoiding the need for urine culture in typical presentations. Fever, flank pain, or symptoms in a pregnant or male patient suggest upper tract or complicated infection and require escalation rather than symptomatic empiric treatment."
+    },
+    {
+      "id": "GUID-010",
+      "topic": "Bacterial vs viral conjunctivitis",
+      "icd10": "H10.3",
+      "text": "Purulent, sticky discharge with eyes crusted shut on waking favours a bacterial cause and responds to topical chloramphenicol. Watery discharge with itching favours a viral or allergic cause instead. Eye pain, photophobia or reduced vision are not features of simple conjunctivitis and require urgent ophthalmology assessment."
+    },
+    {
+      "id": "GUID-011",
+      "topic": "Topical antifungal duration for dermatophytosis",
+      "icd10": "B35.9",
+      "text": "Superficial fungal skin infections require continued topical antifungal treatment for one to two weeks after visible clearance to prevent recurrence, since dermatophytes persist in the stratum corneum beyond visible resolution. Scalp or nail involvement responds poorly to topical treatment alone and needs escalation for oral therapy."
+    },
+    {
+      "id": "GUID-012",
+      "topic": "Distinguishing migraine from tension-type and secondary headache",
+      "icd10": "G43.9",
+      "text": "Migraine is typically unilateral, throbbing and associated with photophobia, phonophobia or nausea, distinct from the bilateral pressing quality of tension-type headache. As with any headache presentation, thunderclap onset, a new pattern in a patient over 50, or an accompanying neurological deficit override a migraine impression and require urgent evaluation rather than symptomatic treatment."
+    },
+    {
+      "id": "GUID-013",
+      "topic": "Functional dyspepsia vs alarm features",
+      "icd10": "K30",
+      "text": "Early satiety and postprandial fullness without weight loss, dysphagia or bleeding is managed symptomatically with a prokinetic and dietary modification. Any alarm feature — unintentional weight loss, difficulty swallowing, evidence of gastrointestinal bleeding, or new onset after age 55 — requires escalation for further investigation rather than continued symptomatic management."
+    },
+    {
+      "id": "GUID-014",
+      "topic": "Supportive care and infection control in varicella",
+      "icd10": "B01.9",
+      "text": "Uncomplicated chickenpox in a child is managed with supportive care for itching and fever; antivirals are not routinely required. Isolation from pregnant women, neonates and immunocompromised contacts is essential until all lesions have crusted, since active vesicles remain infectious."
+    },
+    {
+      "id": "GUID-015",
+      "topic": "Concurrent household treatment in scabies",
+      "icd10": "B86",
+      "text": "Scabies treatment fails if household and close contacts are not treated simultaneously, even if they are asymptomatic, since the incubation period can be several weeks. A single overnight application of permethrin is standard, repeated after seven days to eliminate any mites hatched from surviving eggs."
+    },
+    {
+      "id": "GUID-016",
+      "topic": "Topical management of oral candidiasis",
+      "icd10": "B37.0",
+      "text": "Uncomplicated oral thrush responds to topical nystatin suspension swished and swallowed. Recurrent or persistent thrush, or spread down the throat, should prompt screening for underlying immunosuppression or uncontrolled diabetes rather than repeated topical courses alone."
+    },
+    {
+      "id": "GUID-017",
+      "topic": "Topical vs systemic treatment threshold in impetigo",
+      "icd10": "L01.00",
+      "text": "Localised impetigo responds to topical mupirocin. Extensive involvement, fever, or signs of spreading cellulitis indicate a more invasive infection requiring escalation for systemic antibiotics rather than continued topical treatment."
+    },
+    {
+      "id": "GUID-018",
+      "topic": "Otitis externa vs otitis media",
+      "icd10": "H60.9",
+      "text": "Pain reproduced by pulling the pinna or pressing the tragus, with a normal or difficult-to-visualise eardrum, points to otitis externa rather than a middle-ear infection, and is treated with topical antibiotic-steroid drops rather than an oral antibiotic. Suspected perforation is a reason to avoid ototoxic drop formulations and escalate."
+    },
+    {
+      "id": "GUID-019",
+      "topic": "Empiric antibiotics in bacterial tonsillitis",
+      "icd10": "J03.90",
+      "text": "Tonsillar exudate, fever and painful swallowing without cough are more suggestive of bacterial tonsillitis than a routine viral sore throat, and amoxicillin is a standard empiric choice. Drooling, muffled voice, trismus or neck swelling suggest a peritonsillar or deep space complication and require urgent escalation, not continued oral antibiotics."
+    },
+    {
+      "id": "GUID-020",
+      "topic": "Antibiotic stewardship in acute sinusitis",
+      "icd10": "J01.90",
+      "text": "Most acute sinusitis is viral and resolves with decongestant and saline irrigation within 7-10 days. Antibiotics are reserved for symptoms persisting beyond 10 days without improvement, or worsening after initial improvement (a 'double worsening' pattern). Periorbital swelling or severe headache with sinusitis requires urgent escalation for possible orbital or intracranial spread."
+    },
+    {
+      "id": "GUID-021",
+      "topic": "Supportive care in uncomplicated bronchitis",
+      "icd10": "J20.9",
+      "text": "Acute bronchitis in an otherwise healthy adult is almost always viral; antibiotics do not shorten its course and are not indicated. Management is symptomatic. Breathlessness, chest pain, haemoptysis or a cough persisting beyond three weeks warrants escalation to rule out pneumonia or another cause."
+    },
+    {
+      "id": "GUID-022",
+      "topic": "NSAID timing in primary dysmenorrhoea",
+      "icd10": "N94.6",
+      "text": "NSAIDs such as mefenamic acid are most effective for menstrual cramps when started at the onset of bleeding or pain rather than waiting for pain to peak, since they work by reducing prostaglandin production. Pain occurring outside the menstrual cycle, or a new pattern of severe pain, is not typical primary dysmenorrhoea and warrants evaluation."
+    },
+    {
+      "id": "GUID-023",
+      "topic": "Stepwise approach to functional constipation",
+      "icd10": "K59.00",
+      "text": "Bulk-forming and osmotic laxatives, combined with fluid and fibre intake, are first-line for functional constipation. Blood in stool, unintentional weight loss, or new constipation in an older adult are alarm features that require investigation rather than continued laxative use."
+    },
+    {
+      "id": "GUID-024",
+      "topic": "Conservative management of uncomplicated haemorrhoids",
+      "icd10": "K64.9",
+      "text": "Grade I-II haemorrhoids respond to topical treatment, fibre and avoidance of straining. Heavy or persistent bleeding, a sudden very painful hard lump (suggesting thrombosis), or black tarry stool require escalation rather than continued topical management, since these are not features of simple haemorrhoidal disease."
+    },
+    {
+      "id": "GUID-025",
+      "topic": "First-line topical therapy in mild acne",
+      "icd10": "L70.0",
+      "text": "Mild to moderate comedonal and inflammatory acne responds to topical benzoyl peroxide, introduced gradually to limit irritation. Deep painful nodules, cysts, or scarring indicate more severe disease that benefits from escalation to a clinician for systemic therapy rather than continued topical treatment alone."
+    },
+    {
+      "id": "GUID-026",
+      "topic": "Trigger avoidance in contact dermatitis",
+      "icd10": "L23.9",
+      "text": "Allergic contact dermatitis resolves with topical steroid and emollient once the triggering substance is identified and avoided; without trigger avoidance, symptoms recur despite treatment. Signs of secondary bacterial infection or widespread involvement require escalation rather than continued topical steroid alone."
+    },
+    {
+      "id": "GUID-027",
+      "topic": "Urticaria as a spectrum with anaphylaxis",
+      "icd10": "L50.9",
+      "text": "Isolated skin welts without airway or systemic involvement are managed with a non-sedating antihistamine. Any swelling of the lips, tongue or throat, or breathing difficulty, represents a different and more severe process on the same allergic spectrum and must be escalated immediately rather than treated as simple urticaria."
+    },
+    {
+      "id": "GUID-028",
+      "topic": "Non-pharmacological measures in motion sickness",
+      "icd10": "T75.3",
+      "text": "Positional strategies (forward-facing seating, fixing gaze on the horizon) reduce motion sickness severity and are used alongside antihistamine antiemetics like dimenhydrinate, which are most effective when taken before travel begins rather than after symptoms start."
+    },
+    {
+      "id": "GUID-029",
+      "topic": "Distinguishing BPPV from central vertigo",
+      "icd10": "H81.10",
+      "text": "Vertigo that is brief, triggered specifically by head or position change, and free of hearing loss or other neurological signs is typical of benign paroxysmal positional vertigo. Continuous vertigo, hearing change, double vision or limb weakness point to a central or other cause and require escalation rather than symptomatic vestibular treatment."
+    },
+    {
+      "id": "GUID-030",
+      "topic": "RICE principle in minor musculoskeletal injury",
+      "icd10": "M62.6",
+      "text": "Rest, ice, compression and elevation in the first 48 hours, combined with an NSAID for pain, is standard for a minor muscle strain or sprain where the limb remains usable. Inability to bear weight, visible deformity, or numbness suggest a more significant injury requiring escalation for imaging rather than home management."
+    },
+    {
+      "id": "GUID-031",
+      "topic": "Red flags distinguishing mechanical from serious back pain",
+      "icd10": "M54.5",
+      "text": "Mechanical low back pain without leg radiation, numbness or bladder/bowel symptoms is managed with analgesia and continued activity, since prolonged bed rest delays recovery. Radiation below the knee, saddle numbness, or loss of bladder or bowel control are red flags for cauda equina syndrome or significant nerve compression and require immediate escalation, not symptomatic treatment."
+    },
+    {
+      "id": "GUID-032",
+      "topic": "Screen-related dry eye vs pathological causes",
+      "icd10": "H04.129",
+      "text": "Gritty, tired eyes related to prolonged screen use respond to lubricant drops and behavioural measures such as the 20-20-20 rule. Eye pain, discharge or vision change are not typical of simple digital eye strain and warrant escalation for a proper ophthalmic assessment."
+    },
+    {
+      "id": "GUID-033",
+      "topic": "Localised bite reaction vs systemic allergic response",
+      "icd10": "W57",
+      "text": "A localised itchy, swollen bite site is managed with topical antipruritic and oral antihistamine. Spreading redness and warmth suggest secondary infection or cellulitis rather than a simple bite reaction, and any swelling of the lips, tongue or throat, or breathing difficulty, indicates a systemic allergic reaction requiring immediate escalation."
+    },
+    {
+      "id": "GUID-034",
+      "topic": "Uncomplicated vaginal candidiasis",
+      "icd10": "B37.3",
+      "text": "Classic itching with thick, non-malodorous discharge and no fever or pelvic pain responds to a single-dose topical azole. Fever, pelvic pain, foul odour, pregnancy, or four or more infections per year fall outside straightforward uncomplicated candidiasis and require escalation rather than repeated self-treatment."
+    },
+    {
+      "id": "GUID-035",
+      "topic": "Toothache is temporary relief, not dental treatment",
+      "icd10": "K08.8",
+      "text": "Analgesia for dental pain manages symptoms only; it does not treat caries, abscess or the underlying dental pathology. Facial swelling, fever, or difficulty opening the mouth or swallowing suggest a spreading dental infection and require urgent escalation rather than continued analgesia while awaiting a routine dental appointment."
+    },
+    {
+      "id": "GUID-036",
+      "topic": "Concurrent household treatment in head lice",
+      "icd10": "B85.0",
+      "text": "As with scabies, head lice treatment is most effective when all household contacts are checked and treated simultaneously, with a repeat application after seven days to catch lice hatched from eggs that survived the first treatment. Signs of secondary skin infection from scratching warrant escalation beyond continued pediculicide use."
     }
   ]
 }
