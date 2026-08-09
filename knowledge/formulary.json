@@ -218,6 +218,929 @@
         "swelling of lips or tongue",
         "throat tightness"
       ]
+    },
+    {
+      "id": "PROTO-UTI",
+      "icd10": "N39.0",
+      "condition": "Uncomplicated urinary tract infection (cystitis)",
+      "presentation": "Burning or painful urination with urinary frequency and urgency, in a non-pregnant adult with no fever or flank pain.",
+      "keywords": [
+        "burning urination", "painful urination", "burning when I pee", "frequent urination",
+        "urinary urgency", "cloudy urine", "foul smelling urine",
+        "peshab me jalan", "baar baar peshab", "पेशाब में जलन", "बार-बार पेशाब"
+      ],
+      "medications": [
+        {
+          "name": "Nitrofurantoin",
+          "dosage": "100 mg",
+          "frequency": "Twice daily",
+          "duration": "5 days",
+          "instructions": "Take with food to reduce stomach upset. Complete the full course even if symptoms improve early.",
+          "drug_class": "antibiotic_nitrofuran",
+          "contraindicated_allergies": ["nitrofurantoin", "nitrofuran"],
+          "cautions": ["pregnancy near term", "renal impairment", "G6PD deficiency"]
+        }
+      ],
+      "instructions": "Drink plenty of water. Avoid holding urine for long periods. Complete the full antibiotic course.",
+      "escalate_if": [
+        "fever",
+        "flank or back pain",
+        "blood in urine",
+        "pregnant",
+        "male patient",
+        "symptoms recur within weeks"
+      ]
+    },
+    {
+      "id": "PROTO-CONJUNCTIVITIS-BACTERIAL",
+      "icd10": "H10.3",
+      "condition": "Acute bacterial conjunctivitis",
+      "presentation": "Red eye with sticky yellow-green discharge and crusting, eyes stuck together on waking, without pain or vision change.",
+      "keywords": [
+        "sticky eyes", "eye discharge yellow", "eyes stuck together in morning",
+        "red eye with discharge", "crusty eyelids", "pus in eye",
+        "aankh me chipchipapan", "आँख में चिपचिपापन"
+      ],
+      "medications": [
+        {
+          "name": "Chloramphenicol Eye Drops (0.5%)",
+          "dosage": "1-2 drops",
+          "frequency": "Four times daily",
+          "duration": "5-7 days",
+          "instructions": "Wash hands before use. Wipe away discharge with clean water before instilling. Do not touch the dropper tip to the eye.",
+          "drug_class": "antibiotic_topical_ophthalmic",
+          "contraindicated_allergies": ["chloramphenicol"],
+          "cautions": ["contact lens use during treatment"]
+        }
+      ],
+      "instructions": "Avoid sharing towels or pillows. Wash hands frequently to prevent spread. Discontinue contact lens use until resolved.",
+      "escalate_if": [
+        "eye pain",
+        "vision change",
+        "sudden loss of vision",
+        "chemical exposure",
+        "not improving after 3 days"
+      ]
+    },
+    {
+      "id": "PROTO-TINEA",
+      "icd10": "B35.9",
+      "condition": "Dermatophytosis (fungal skin infection / ringworm)",
+      "presentation": "Itchy ring-shaped rash with a clear centre and raised scaly border, or peeling skin between the toes.",
+      "keywords": [
+        "itchy ring shaped rash", "circular rash with clear center", "ringworm",
+        "skin peeling between toes", "athlete's foot", "scaly itchy patch",
+        "khujli gol nishan", "खुजली गोल निशान"
+      ],
+      "medications": [
+        {
+          "name": "Clotrimazole Cream (1%)",
+          "dosage": "Thin layer",
+          "frequency": "Twice daily",
+          "duration": "2-4 weeks",
+          "instructions": "Apply to the affected area and 2 cm beyond the visible edge. Continue for a week after the rash clears to prevent recurrence.",
+          "drug_class": "antifungal_topical",
+          "contraindicated_allergies": ["clotrimazole", "azole antifungal"],
+          "cautions": []
+        }
+      ],
+      "instructions": "Keep the area clean and dry. Avoid sharing towels or clothing. Wear breathable footwear if the feet are affected.",
+      "escalate_if": [
+        "spreading despite treatment",
+        "involves the scalp or nails",
+        "signs of secondary bacterial infection",
+        "diabetic patient"
+      ]
+    },
+    {
+      "id": "PROTO-MIGRAINE",
+      "icd10": "G43.9",
+      "condition": "Migraine",
+      "presentation": "Throbbing, pulsating headache typically one-sided, with light sensitivity and nausea, sometimes preceded by an aura.",
+      "keywords": [
+        "throbbing one sided headache", "pulsating pain on one side of head", "aura before an attack",
+        "photophobia and nausea", "light sensitivity and nausea together", "migraine attack",
+        "sound sensitivity during an attack"
+      ],
+      "medications": [
+        {
+          "name": "Ibuprofen",
+          "dosage": "400 mg",
+          "frequency": "As needed, up to three times daily",
+          "duration": "As needed during attacks",
+          "instructions": "Take at the earliest sign of an attack with food. Do not exceed 3 doses in 24 hours.",
+          "drug_class": "nsaid",
+          "contraindicated_allergies": ["ibuprofen", "nsaid", "aspirin"],
+          "cautions": ["peptic ulcer disease", "renal impairment", "third trimester pregnancy"]
+        },
+        {
+          "name": "Domperidone",
+          "dosage": "10 mg",
+          "frequency": "As needed for nausea",
+          "duration": "As needed during attacks",
+          "instructions": "Take 15-30 minutes before the pain reliever if nausea is prominent.",
+          "drug_class": "prokinetic_antiemetic",
+          "contraindicated_allergies": ["domperidone"],
+          "cautions": ["cardiac conduction abnormality"]
+        }
+      ],
+      "instructions": "Rest in a dark, quiet room. Identify and avoid personal triggers (skipped meals, poor sleep, certain foods). Keep a headache diary if attacks are frequent.",
+      "escalate_if": [
+        "sudden thunderclap onset",
+        "worst headache of life",
+        "new neurological deficit",
+        "headache after head injury",
+        "attacks increasing in frequency or severity"
+      ]
+    },
+    {
+      "id": "PROTO-DYSPEPSIA",
+      "icd10": "K30",
+      "condition": "Functional (non-ulcer) dyspepsia",
+      "presentation": "Upper abdominal fullness and early satiety after meals, without the meal-timed retrosternal burning typical of reflux.",
+      "keywords": [
+        "feeling full quickly after eating", "early satiety", "upper abdominal fullness after meals",
+        "loss of appetite with fullness", "discomfort after small meals"
+      ],
+      "medications": [
+        {
+          "name": "Domperidone",
+          "dosage": "10 mg",
+          "frequency": "Three times daily before meals",
+          "duration": "7 days",
+          "instructions": "Take 15-30 minutes before eating.",
+          "drug_class": "prokinetic",
+          "contraindicated_allergies": ["domperidone"],
+          "cautions": ["cardiac conduction abnormality"]
+        }
+      ],
+      "instructions": "Eat smaller, more frequent meals. Avoid lying down immediately after eating. Reduce caffeine and carbonated drinks.",
+      "escalate_if": [
+        "unintentional weight loss",
+        "difficulty swallowing",
+        "vomiting blood or black stools",
+        "symptoms persisting beyond 2 weeks",
+        "age over 55 with new symptoms"
+      ]
+    },
+    {
+      "id": "PROTO-CHICKENPOX",
+      "icd10": "B01.9",
+      "condition": "Varicella (chickenpox), uncomplicated",
+      "presentation": "Itchy, fluid-filled blisters in crops spreading over the body, often with mild fever.",
+      "keywords": [
+        "itchy fluid filled blisters", "chickenpox rash spreading", "blisters all over body itchy",
+        "vesicular rash in crops", "chickenpox"
+      ],
+      "medications": [
+        {
+          "name": "Calamine Lotion",
+          "dosage": "Apply as needed",
+          "frequency": "3-4 times daily",
+          "duration": "Until blisters crust over",
+          "instructions": "Apply to itchy lesions with a clean cotton pad. Keep nails short to reduce scratching and scarring.",
+          "drug_class": "topical_antipruritic",
+          "contraindicated_allergies": [],
+          "cautions": []
+        },
+        {
+          "name": "Chlorpheniramine",
+          "dosage": "4 mg",
+          "frequency": "Every 6-8 hours as needed",
+          "duration": "5-7 days",
+          "instructions": "May cause drowsiness. For itching relief, particularly at night.",
+          "drug_class": "antihistamine",
+          "contraindicated_allergies": ["chlorpheniramine", "antihistamine"],
+          "cautions": ["elderly patients"]
+        }
+      ],
+      "instructions": "Isolate from pregnant women, newborns and immunocompromised individuals until all lesions have crusted. Keep the patient hydrated and cool.",
+      "escalate_if": [
+        "difficulty breathing",
+        "lesions become painful and spreading red (secondary bacterial infection)",
+        "high fever beyond 4 days",
+        "adult patient",
+        "pregnant contact"
+      ]
+    },
+    {
+      "id": "PROTO-SCABIES",
+      "icd10": "B86",
+      "condition": "Scabies",
+      "presentation": "Intense itching, worse at night, classically involving the finger webs, wrists and groin, often with similar symptoms in household contacts.",
+      "keywords": [
+        "itching between fingers", "night time itching worse", "family members also itching",
+        "intense itching at night", "scabies", "burrow marks on skin"
+      ],
+      "medications": [
+        {
+          "name": "Permethrin Cream (5%)",
+          "dosage": "Whole body application",
+          "frequency": "Single overnight application",
+          "duration": "Apply once, wash off after 8-14 hours; repeat after 7 days",
+          "instructions": "Apply to the entire body from neck down, including under nails and between fingers. All household contacts should be treated simultaneously.",
+          "drug_class": "scabicide_topical",
+          "contraindicated_allergies": ["permethrin", "pyrethroid"],
+          "cautions": ["infants under 2 months"]
+        }
+      ],
+      "instructions": "Wash all bedding, clothing and towels in hot water. Treat all household and close contacts at the same time to prevent reinfestation.",
+      "escalate_if": [
+        "widespread crusted lesions",
+        "immunocompromised patient",
+        "signs of secondary bacterial infection",
+        "infant under 2 months"
+      ]
+    },
+    {
+      "id": "PROTO-ORAL-THRUSH",
+      "icd10": "B37.0",
+      "condition": "Oral candidiasis (thrush)",
+      "presentation": "White, curd-like patches on the tongue or inner cheeks, sometimes with mild soreness, that can be wiped off leaving a red base.",
+      "keywords": [
+        "white patches in mouth", "white coating on tongue", "mouth soreness with white patches",
+        "oral thrush", "curd like patches mouth"
+      ],
+      "medications": [
+        {
+          "name": "Nystatin Oral Suspension",
+          "dosage": "1 ml (100,000 units)",
+          "frequency": "Four times daily",
+          "duration": "7-14 days",
+          "instructions": "Swish around the mouth for as long as possible before swallowing. Continue for 2 days after symptoms clear.",
+          "drug_class": "antifungal_topical_oral",
+          "contraindicated_allergies": ["nystatin"],
+          "cautions": []
+        }
+      ],
+      "instructions": "Rinse mouth after meals. Denture wearers should clean and soak dentures overnight. Consider checking blood sugar if recurrent.",
+      "escalate_if": [
+        "difficulty swallowing",
+        "spreading down the throat",
+        "recurrent or persistent despite treatment",
+        "known immunocompromise or uncontrolled diabetes"
+      ]
+    },
+    {
+      "id": "PROTO-IMPETIGO",
+      "icd10": "L01.00",
+      "condition": "Impetigo",
+      "presentation": "Honey-coloured crusted sores, often around the nose and mouth, sometimes with oozing, most common in children.",
+      "keywords": [
+        "honey colored crust on skin", "oozing skin sores", "crusty sores on face children",
+        "impetigo", "weeping skin sores"
+      ],
+      "medications": [
+        {
+          "name": "Mupirocin Ointment (2%)",
+          "dosage": "Thin layer",
+          "frequency": "Three times daily",
+          "duration": "5 days",
+          "instructions": "Gently clean crusts with soap and water before application. Cover with a light dressing to prevent spread.",
+          "drug_class": "antibiotic_topical",
+          "contraindicated_allergies": ["mupirocin"],
+          "cautions": []
+        }
+      ],
+      "instructions": "Keep the child home from school/daycare until 24 hours of treatment is complete. Avoid sharing towels. Wash hands frequently to prevent spread.",
+      "escalate_if": [
+        "extensive involvement beyond a small area",
+        "fever",
+        "signs of spreading cellulitis",
+        "not improving after 5 days"
+      ]
+    },
+    {
+      "id": "PROTO-OTITIS-EXTERNA",
+      "icd10": "H60.9",
+      "condition": "Acute otitis externa (swimmer's ear)",
+      "presentation": "Ear pain worsened by pulling the ear or jaw movement, itchy ear canal, sometimes with discharge, often after water exposure.",
+      "keywords": [
+        "ear pain when pulling ear", "itchy ear canal", "ear discharge", "swimmer's ear",
+        "water in ear pain"
+      ],
+      "medications": [
+        {
+          "name": "Ciprofloxacin + Dexamethasone Ear Drops",
+          "dosage": "4 drops",
+          "frequency": "Twice daily",
+          "duration": "7 days",
+          "instructions": "Lie with the affected ear up for 2-3 minutes after instilling. Keep the ear dry during treatment.",
+          "drug_class": "antibiotic_topical_otic",
+          "contraindicated_allergies": ["ciprofloxacin", "fluoroquinolone", "dexamethasone"],
+          "cautions": ["perforated eardrum"]
+        }
+      ],
+      "instructions": "Keep the ear dry; avoid swimming until resolved. Do not insert cotton buds into the ear canal.",
+      "escalate_if": [
+        "suspected perforated eardrum",
+        "swelling extending beyond the ear",
+        "fever",
+        "diabetic patient",
+        "not improving after 5-7 days"
+      ]
+    },
+    {
+      "id": "PROTO-TONSILLITIS-BACTERIAL",
+      "icd10": "J03.90",
+      "condition": "Acute bacterial tonsillitis/pharyngitis",
+      "presentation": "Severe throat pain with fever, visible white patches or pus on the tonsils, and painful swallowing, distinct from a routine viral sore throat.",
+      "keywords": [
+        "white patches on tonsils", "pus on tonsils", "severe throat pain with fever",
+        "difficulty swallowing with fever and swollen glands", "swollen tonsils with fever"
+      ],
+      "medications": [
+        {
+          "name": "Amoxicillin",
+          "dosage": "500 mg",
+          "frequency": "Three times daily",
+          "duration": "7 days",
+          "instructions": "Take with or without food. Complete the full course even if symptoms improve within a few days.",
+          "drug_class": "antibiotic_penicillin",
+          "contraindicated_allergies": ["amoxicillin", "penicillin", "beta-lactam"],
+          "cautions": ["infectious mononucleosis suspected"]
+        }
+      ],
+      "instructions": "Warm salt-water gargles for comfort. Maintain hydration and soft diet. Rest voice if hoarse.",
+      "escalate_if": [
+        "difficulty breathing or swallowing saliva",
+        "drooling",
+        "muffled voice",
+        "neck swelling",
+        "symptoms worsening after 3 days of antibiotics"
+      ]
+    },
+    {
+      "id": "PROTO-SINUSITIS",
+      "icd10": "J01.90",
+      "condition": "Acute sinusitis",
+      "presentation": "Facial pain or pressure over the cheeks and forehead, worse on bending forward, with nasal congestion, typically following a cold.",
+      "keywords": [
+        "facial pain with pressure", "pain over cheeks and forehead", "sinus pressure",
+        "nasal congestion with facial pain", "pain worse bending forward"
+      ],
+      "medications": [
+        {
+          "name": "Pseudoephedrine",
+          "dosage": "60 mg",
+          "frequency": "Every 6 hours as needed",
+          "duration": "3-5 days",
+          "instructions": "Avoid taking in the evening as it can cause insomnia. Do not exceed 5 days of continuous use.",
+          "drug_class": "decongestant",
+          "contraindicated_allergies": ["pseudoephedrine"],
+          "cautions": ["hypertension", "cardiac disease", "elderly patients"]
+        },
+        {
+          "name": "Saline Nasal Irrigation",
+          "dosage": "Non-pharmacological",
+          "frequency": "2-3 times daily",
+          "duration": "Until symptoms resolve",
+          "instructions": "Use isotonic saline rinse to clear nasal passages.",
+          "drug_class": "non_pharmacological",
+          "contraindicated_allergies": [],
+          "cautions": []
+        }
+      ],
+      "instructions": "Steam inhalation may provide symptomatic relief. Most acute sinusitis is viral; antibiotics are reserved for symptoms persisting beyond 10 days or worsening after initial improvement.",
+      "escalate_if": [
+        "symptoms beyond 10 days without improvement",
+        "swelling around the eye",
+        "severe headache",
+        "high fever",
+        "vision changes"
+      ]
+    },
+    {
+      "id": "PROTO-BRONCHITIS",
+      "icd10": "J20.9",
+      "condition": "Acute bronchitis (viral, uncomplicated)",
+      "presentation": "Persistent cough, often productive of mucus, continuing after the other cold symptoms have resolved, without breathlessness or chest pain.",
+      "keywords": [
+        "persistent cough after cold", "productive cough with mucus after cold", "chest cold cough",
+        "wheeze with cough after cold", "cough lingering after cold"
+      ],
+      "medications": [
+        {
+          "name": "Dextromethorphan Cough Syrup",
+          "dosage": "10 ml",
+          "frequency": "Every 6-8 hours as needed",
+          "duration": "5-7 days",
+          "instructions": "Take for troublesome dry cough. Not for use in a productive/wet cough where suppressing clearance is undesirable.",
+          "drug_class": "antitussive",
+          "contraindicated_allergies": ["dextromethorphan"],
+          "cautions": ["concurrent MAOI use"]
+        }
+      ],
+      "instructions": "Steam inhalation and warm fluids may ease symptoms. Antibiotics are not indicated for uncomplicated viral bronchitis. Avoid smoke exposure.",
+      "escalate_if": [
+        "breathlessness",
+        "chest pain",
+        "coughing blood",
+        "high fever",
+        "cough persisting beyond 3 weeks"
+      ]
+    },
+    {
+      "id": "PROTO-DYSMENORRHEA",
+      "icd10": "N94.6",
+      "condition": "Primary dysmenorrhoea (menstrual cramps)",
+      "presentation": "Crampy lower abdominal pain occurring with menstrual periods, without abnormal bleeding or pain outside the menstrual cycle.",
+      "keywords": [
+        "period cramps", "menstrual pain", "pain during periods", "cramping with periods",
+        "pet me dard periods ke dauran"
+      ],
+      "medications": [
+        {
+          "name": "Mefenamic Acid",
+          "dosage": "500 mg",
+          "frequency": "Three times daily",
+          "duration": "During painful days of the cycle, up to 5 days",
+          "instructions": "Take with food. Start at the onset of pain or bleeding for best effect.",
+          "drug_class": "nsaid",
+          "contraindicated_allergies": ["mefenamic acid", "nsaid", "aspirin"],
+          "cautions": ["peptic ulcer disease", "renal impairment"]
+        }
+      ],
+      "instructions": "A heating pad on the lower abdomen may help. Regular light exercise can reduce symptom severity over time.",
+      "escalate_if": [
+        "pain not related to periods",
+        "abnormally heavy bleeding",
+        "pain not responding to standard analgesia",
+        "new severe pain pattern"
+      ]
+    },
+    {
+      "id": "PROTO-CONSTIPATION",
+      "icd10": "K59.00",
+      "condition": "Functional constipation",
+      "presentation": "Infrequent, hard stools with straining, without alarm features such as bleeding or weight loss.",
+      "keywords": [
+        "difficulty passing stool", "hard stools", "infrequent bowel movements",
+        "straining to pass stool", "constipated"
+      ],
+      "medications": [
+        {
+          "name": "Isabgol (Psyllium Husk)",
+          "dosage": "1 tablespoon",
+          "frequency": "Once or twice daily",
+          "duration": "As needed, ongoing",
+          "instructions": "Mix in a full glass of water or milk and drink immediately. Ensure adequate fluid intake throughout the day.",
+          "drug_class": "bulk_forming_laxative",
+          "contraindicated_allergies": ["psyllium"],
+          "cautions": ["intestinal obstruction"]
+        },
+        {
+          "name": "Lactulose",
+          "dosage": "15 ml",
+          "frequency": "Once or twice daily",
+          "duration": "As needed",
+          "instructions": "May take 1-2 days to take effect. May cause bloating initially.",
+          "drug_class": "osmotic_laxative",
+          "contraindicated_allergies": ["lactulose"],
+          "cautions": ["galactosaemia"]
+        }
+      ],
+      "instructions": "Increase dietary fibre, fluids and physical activity. Establish a regular toileting routine.",
+      "escalate_if": [
+        "blood in stool",
+        "unintentional weight loss",
+        "severe abdominal pain",
+        "no bowel movement for over a week",
+        "new constipation in an older adult"
+      ]
+    },
+    {
+      "id": "PROTO-HEMORRHOIDS",
+      "icd10": "K64.9",
+      "condition": "Uncomplicated haemorrhoids",
+      "presentation": "Discomfort or bleeding with bowel movements, itching or a lump near the anus, without severe pain or dark blood.",
+      "keywords": [
+        "pain during bowel movement", "bleeding after passing stool", "itching around anus",
+        "lump near anus", "haemorrhoids", "piles"
+      ],
+      "medications": [
+        {
+          "name": "Hydrocortisone + Lidocaine Cream",
+          "dosage": "Thin layer",
+          "frequency": "Twice daily",
+          "duration": "7 days",
+          "instructions": "Apply to the affected area after gentle cleaning. Do not use for more than 7 days continuously.",
+          "drug_class": "topical_steroid_anaesthetic",
+          "contraindicated_allergies": ["hydrocortisone", "lidocaine"],
+          "cautions": ["local infection"]
+        }
+      ],
+      "instructions": "Increase dietary fibre and fluids to soften stool. Avoid straining. Warm sitz baths may relieve discomfort.",
+      "escalate_if": [
+        "heavy or persistent bleeding",
+        "black tarry stool",
+        "severe pain",
+        "a hard, very painful lump (possible thrombosis)",
+        "no improvement after a week"
+      ]
+    },
+    {
+      "id": "PROTO-ACNE",
+      "icd10": "L70.0",
+      "condition": "Acne vulgaris, mild to moderate",
+      "presentation": "Facial or truncal pimples, blackheads and whiteheads on oily skin, without deep painful nodules or scarring.",
+      "keywords": [
+        "facial pimples", "blackheads and whiteheads", "acne breakouts", "oily skin with pimples",
+        "acne"
+      ],
+      "medications": [
+        {
+          "name": "Benzoyl Peroxide Gel (2.5%)",
+          "dosage": "Thin layer",
+          "frequency": "Once daily, increasing to twice daily as tolerated",
+          "duration": "6-8 weeks for visible effect",
+          "instructions": "Apply to clean, dry skin. Start with once daily to build tolerance; may cause dryness or peeling initially. Use sunscreen during the day.",
+          "drug_class": "topical_antimicrobial",
+          "contraindicated_allergies": ["benzoyl peroxide"],
+          "cautions": ["sensitive skin", "concurrent use with bleaching fabrics"]
+        }
+      ],
+      "instructions": "Wash affected areas gently twice daily; avoid harsh scrubbing. Avoid picking or squeezing lesions. Results take 6-8 weeks; do not switch products too soon.",
+      "escalate_if": [
+        "deep painful nodules or cysts",
+        "scarring",
+        "not responding after 8-12 weeks",
+        "sudden severe flare with systemic symptoms"
+      ]
+    },
+    {
+      "id": "PROTO-CONTACT-DERMATITIS",
+      "icd10": "L23.9",
+      "condition": "Allergic contact dermatitis / mild eczema",
+      "presentation": "Itchy, red patches at the site of contact with a trigger substance, or dry itchy patches in a typical eczema distribution.",
+      "keywords": [
+        "itchy red patches after contact", "skin rash where jewelry touches", "itchy dry patches",
+        "red itchy skin rash", "eczema flare"
+      ],
+      "medications": [
+        {
+          "name": "Hydrocortisone Cream (1%)",
+          "dosage": "Thin layer",
+          "frequency": "Twice daily",
+          "duration": "7-14 days",
+          "instructions": "Apply only to affected areas. Avoid use on the face for more than 5 days without review.",
+          "drug_class": "topical_steroid",
+          "contraindicated_allergies": ["hydrocortisone", "topical steroid"],
+          "cautions": ["broken or infected skin"]
+        },
+        {
+          "name": "Emollient (Fragrance-Free Moisturiser)",
+          "dosage": "Liberal application",
+          "frequency": "Several times daily",
+          "duration": "Ongoing",
+          "instructions": "Apply generously, especially after bathing.",
+          "drug_class": "non_pharmacological",
+          "contraindicated_allergies": [],
+          "cautions": []
+        }
+      ],
+      "instructions": "Identify and avoid the triggering substance (jewellery, detergent, cosmetic). Use fragrance-free skin products.",
+      "escalate_if": [
+        "signs of infection (increasing redness, warmth, pus)",
+        "widespread involvement",
+        "not improving after 2 weeks",
+        "facial or genital involvement"
+      ]
+    },
+    {
+      "id": "PROTO-URTICARIA",
+      "icd10": "L50.9",
+      "condition": "Acute urticaria (hives), non-anaphylactic",
+      "presentation": "Itchy, raised, migratory welts that appear and resolve within hours, without breathing difficulty or facial swelling.",
+      "keywords": [
+        "itchy raised welts", "hives without breathing difficulty", "skin welts come and go",
+        "itchy bumps all over body", "urticaria"
+      ],
+      "medications": [
+        {
+          "name": "Levocetirizine",
+          "dosage": "5 mg",
+          "frequency": "Once daily",
+          "duration": "5-7 days",
+          "instructions": "Take at bedtime; may cause mild drowsiness.",
+          "drug_class": "antihistamine",
+          "contraindicated_allergies": ["levocetirizine", "cetirizine", "antihistamine"],
+          "cautions": ["renal impairment"]
+        }
+      ],
+      "instructions": "Identify and avoid a possible trigger (new food, medication, contact). Cool compresses may soothe itching.",
+      "escalate_if": [
+        "swelling of lips, tongue or throat",
+        "breathing difficulty",
+        "dizziness or fainting",
+        "welts persisting beyond 6 weeks"
+      ]
+    },
+    {
+      "id": "PROTO-MOTION-SICKNESS",
+      "icd10": "T75.3",
+      "condition": "Motion sickness",
+      "presentation": "Nausea, dizziness and queasiness occurring during travel by car, boat or air, resolving once travel stops.",
+      "keywords": [
+        "nausea while traveling", "car sickness", "dizziness during travel",
+        "motion sickness vomiting", "queasy on car journey"
+      ],
+      "medications": [
+        {
+          "name": "Dimenhydrinate",
+          "dosage": "50 mg",
+          "frequency": "Every 6-8 hours as needed",
+          "duration": "For the duration of travel",
+          "instructions": "Take 30-60 minutes before travel. Causes drowsiness; avoid driving.",
+          "drug_class": "antihistamine_antiemetic",
+          "contraindicated_allergies": ["dimenhydrinate", "antihistamine"],
+          "cautions": ["glaucoma", "prostate enlargement"]
+        }
+      ],
+      "instructions": "Sit facing forward and fix gaze on the horizon. Avoid reading during travel. Keep well ventilated.",
+      "escalate_if": [
+        "persistent vomiting unrelated to travel",
+        "associated with headache or neurological symptoms",
+        "dizziness persisting after travel ends"
+      ]
+    },
+    {
+      "id": "PROTO-BPPV",
+      "icd10": "H81.10",
+      "condition": "Benign paroxysmal positional vertigo",
+      "presentation": "Brief spinning sensation triggered specifically by head movement or position change (rolling over, looking up), without hearing loss or other neurological signs.",
+      "keywords": [
+        "spinning sensation with head movement", "dizziness when turning head",
+        "room spinning briefly", "vertigo triggered by movement", "brief spinning episodes"
+      ],
+      "medications": [
+        {
+          "name": "Betahistine",
+          "dosage": "16 mg",
+          "frequency": "Three times daily",
+          "duration": "2 weeks",
+          "instructions": "Take with food to reduce stomach upset.",
+          "drug_class": "vestibular_suppressant",
+          "contraindicated_allergies": ["betahistine"],
+          "cautions": ["asthma", "peptic ulcer disease"]
+        }
+      ],
+      "instructions": "Move slowly when changing position. Sit on the edge of the bed for a moment before standing.",
+      "escalate_if": [
+        "hearing loss or ringing in the ear",
+        "double vision",
+        "limb weakness or numbness",
+        "vertigo lasting continuously beyond a day",
+        "difficulty walking"
+      ]
+    },
+    {
+      "id": "PROTO-MUSCLE-STRAIN",
+      "icd10": "M62.6",
+      "condition": "Muscle strain / mild sprain",
+      "presentation": "Localised pain and mild swelling after exercise, lifting or a twisting injury, with the joint or limb still usable.",
+      "keywords": [
+        "pulled muscle", "sprained ankle mild", "muscle strain from exercise",
+        "twisted joint mild swelling", "muscle pulled during exercise"
+      ],
+      "medications": [
+        {
+          "name": "Diclofenac Gel (1%)",
+          "dosage": "Thin layer",
+          "frequency": "3-4 times daily",
+          "duration": "7 days",
+          "instructions": "Massage gently into the affected area. Wash hands after application.",
+          "drug_class": "topical_nsaid",
+          "contraindicated_allergies": ["diclofenac", "nsaid"],
+          "cautions": ["broken skin"]
+        },
+        {
+          "name": "Ibuprofen",
+          "dosage": "400 mg",
+          "frequency": "Three times daily as needed",
+          "duration": "3-5 days",
+          "instructions": "Take with food.",
+          "drug_class": "nsaid",
+          "contraindicated_allergies": ["ibuprofen", "nsaid", "aspirin"],
+          "cautions": ["peptic ulcer disease", "renal impairment"]
+        }
+      ],
+      "instructions": "Rest, ice, compression and elevation (RICE) for the first 48 hours. Gradually resume activity as tolerated.",
+      "escalate_if": [
+        "unable to bear weight or use the limb at all",
+        "visible deformity",
+        "severe swelling or bruising",
+        "numbness or tingling",
+        "not improving after a week"
+      ]
+    },
+    {
+      "id": "PROTO-LOW-BACK-PAIN",
+      "icd10": "M54.5",
+      "condition": "Mechanical low back pain",
+      "presentation": "Dull, aching lower back pain, often after lifting or prolonged sitting, without radiation below the knee, numbness or bladder/bowel symptoms.",
+      "keywords": [
+        "dull lower back pain", "back pain after lifting", "muscular back pain",
+        "back ache from sitting long", "lower back stiffness"
+      ],
+      "medications": [
+        {
+          "name": "Ibuprofen",
+          "dosage": "400 mg",
+          "frequency": "Three times daily as needed",
+          "duration": "5-7 days",
+          "instructions": "Take with food.",
+          "drug_class": "nsaid",
+          "contraindicated_allergies": ["ibuprofen", "nsaid", "aspirin"],
+          "cautions": ["peptic ulcer disease", "renal impairment"]
+        },
+        {
+          "name": "Diclofenac Gel (1%)",
+          "dosage": "Thin layer",
+          "frequency": "3-4 times daily",
+          "duration": "7 days",
+          "instructions": "Apply to the lower back and massage gently.",
+          "drug_class": "topical_nsaid",
+          "contraindicated_allergies": ["diclofenac", "nsaid"],
+          "cautions": ["broken skin"]
+        }
+      ],
+      "instructions": "Stay active within pain limits; prolonged bed rest delays recovery. Use correct lifting technique and posture.",
+      "escalate_if": [
+        "pain radiating down the leg below the knee",
+        "numbness in the groin or inner thighs",
+        "loss of bladder or bowel control",
+        "leg weakness",
+        "pain persisting beyond 6 weeks"
+      ]
+    },
+    {
+      "id": "PROTO-DRY-EYE",
+      "icd10": "H04.129",
+      "condition": "Dry eye / digital eye strain",
+      "presentation": "Gritty, dry or tired feeling in the eyes, often after prolonged screen use, without discharge, pain or vision change.",
+      "keywords": [
+        "eyes feel dry", "eye strain from screen", "gritty feeling in eyes",
+        "tired eyes from computer", "burning eyes after screen time"
+      ],
+      "medications": [
+        {
+          "name": "Carboxymethylcellulose Lubricant Eye Drops",
+          "dosage": "1-2 drops",
+          "frequency": "As needed, up to four times daily",
+          "duration": "Ongoing as needed",
+          "instructions": "Preservative-free formulation preferred with frequent use. Remove contact lenses before instilling.",
+          "drug_class": "ocular_lubricant",
+          "contraindicated_allergies": [],
+          "cautions": ["contact lens use"]
+        }
+      ],
+      "instructions": "Follow the 20-20-20 rule during screen use (every 20 minutes, look at something 20 feet away for 20 seconds). Blink deliberately and ensure adequate room humidity.",
+      "escalate_if": [
+        "eye pain",
+        "discharge",
+        "vision change",
+        "sensation of a foreign body not relieved by drops",
+        "redness worsening"
+      ]
+    },
+    {
+      "id": "PROTO-INSECT-BITE",
+      "icd10": "W57",
+      "condition": "Localised insect bite reaction",
+      "presentation": "Itchy, mildly swollen area at the site of a mosquito or insect bite, without spreading redness, fever or systemic symptoms.",
+      "keywords": [
+        "mosquito bite swelling", "itchy insect bite", "localized bite swelling",
+        "bug bite itching", "insect bite reaction"
+      ],
+      "medications": [
+        {
+          "name": "Calamine Lotion",
+          "dosage": "Apply as needed",
+          "frequency": "3-4 times daily",
+          "duration": "Until resolved",
+          "instructions": "Apply directly to the bite site.",
+          "drug_class": "topical_antipruritic",
+          "contraindicated_allergies": [],
+          "cautions": []
+        },
+        {
+          "name": "Cetirizine",
+          "dosage": "10 mg",
+          "frequency": "Once daily",
+          "duration": "3-5 days",
+          "instructions": "Take at bedtime if itching is significant; may cause drowsiness.",
+          "drug_class": "antihistamine",
+          "contraindicated_allergies": ["cetirizine", "hydroxyzine", "antihistamine"],
+          "cautions": ["renal impairment"]
+        }
+      ],
+      "instructions": "Avoid scratching to reduce infection risk. A cold compress can reduce swelling.",
+      "escalate_if": [
+        "spreading redness or warmth",
+        "fever",
+        "swelling of lips, tongue or throat",
+        "breathing difficulty",
+        "known scorpion or spider bite"
+      ]
+    },
+    {
+      "id": "PROTO-VAGINAL-CANDIDIASIS",
+      "icd10": "B37.3",
+      "condition": "Vaginal candidiasis (yeast infection)",
+      "presentation": "Vaginal itching with thick, white, non-malodorous discharge, without fever or pelvic pain.",
+      "keywords": [
+        "vaginal itching", "thick white discharge", "vaginal itching and discharge",
+        "yeast infection symptoms", "cottage cheese discharge"
+      ],
+      "medications": [
+        {
+          "name": "Clotrimazole Vaginal Pessary (500 mg)",
+          "dosage": "500 mg",
+          "frequency": "Single dose",
+          "duration": "Single application",
+          "instructions": "Insert high into the vagina at bedtime. May use an accompanying external cream for vulval itching.",
+          "drug_class": "antifungal_topical",
+          "contraindicated_allergies": ["clotrimazole", "azole antifungal"],
+          "cautions": ["pregnancy (use applicator gently)"]
+        }
+      ],
+      "instructions": "Wear breathable cotton underwear. Avoid douching and scented feminine products.",
+      "escalate_if": [
+        "fever or pelvic pain",
+        "foul-smelling discharge",
+        "recurrent infections (4 or more per year)",
+        "pregnant",
+        "not improving after treatment"
+      ]
+    },
+    {
+      "id": "PROTO-TOOTHACHE",
+      "icd10": "K08.8",
+      "condition": "Toothache (temporary relief pending dental review)",
+      "presentation": "Localised tooth or jaw pain, often worse with hot, cold or sweet stimuli. This protocol provides temporary symptomatic relief only and does not treat the underlying dental cause.",
+      "keywords": [
+        "tooth pain", "toothache", "dental pain", "jaw pain from tooth",
+        "sensitive tooth pain"
+      ],
+      "medications": [
+        {
+          "name": "Ibuprofen",
+          "dosage": "400 mg",
+          "frequency": "Three times daily as needed",
+          "duration": "Until dental review, maximum 3 days",
+          "instructions": "Take with food. This is temporary relief only — a dentist must assess the cause.",
+          "drug_class": "nsaid",
+          "contraindicated_allergies": ["ibuprofen", "nsaid", "aspirin"],
+          "cautions": ["peptic ulcer disease", "renal impairment"]
+        },
+        {
+          "name": "Clove Oil (Topical)",
+          "dosage": "A few drops on a cotton pledget",
+          "frequency": "As needed",
+          "duration": "Until dental review",
+          "instructions": "Apply directly to the affected tooth for temporary numbing.",
+          "drug_class": "topical_analgesic",
+          "contraindicated_allergies": ["clove", "eugenol"],
+          "cautions": ["avoid contact with gums for extended periods"]
+        }
+      ],
+      "instructions": "This is temporary symptomatic relief only. A dentist must assess and treat the underlying cause — a prescription here is not a substitute for a dental visit.",
+      "escalate_if": [
+        "facial swelling",
+        "fever",
+        "difficulty opening the mouth or swallowing",
+        "pain not controlled by standard analgesia",
+        "no dental review arranged"
+      ]
+    },
+    {
+      "id": "PROTO-HEAD-LICE",
+      "icd10": "B85.0",
+      "condition": "Head lice (pediculosis capitis)",
+      "presentation": "Itchy scalp with visible lice or nits (eggs) attached to hair shafts, common in school-age children.",
+      "keywords": [
+        "itchy scalp with lice", "nits in hair", "scalp itching children",
+        "lice in hair", "head lice"
+      ],
+      "medications": [
+        {
+          "name": "Permethrin Lotion (1%)",
+          "dosage": "Apply to scalp and hair",
+          "frequency": "Single application",
+          "duration": "Leave on for 10 minutes, then rinse; repeat after 7 days",
+          "instructions": "Apply to dry hair and scalp, leave for the specified time, then rinse and comb with a fine-tooth comb. Treat all affected household members simultaneously.",
+          "drug_class": "pediculicide_topical",
+          "contraindicated_allergies": ["permethrin", "pyrethroid"],
+          "cautions": ["infants under 2 months"]
+        }
+      ],
+      "instructions": "Wash bedding, combs and hats in hot water. Check and treat all household contacts. Repeat treatment after 7 days to catch newly hatched lice.",
+      "escalate_if": [
+        "signs of secondary skin infection (spreading redness, pus)",
+        "treatment failure after two full courses",
+        "infant under 2 months"
+      ]
     }
   ]
 }

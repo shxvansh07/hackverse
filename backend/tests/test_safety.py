@@ -57,6 +57,19 @@ def _complete_case(**overrides):
         "I am vomiting blood",
         "I have blood in my saliva",
         "my lips are swelling and throat closing",
+        # Expanded coverage (2026-08): new categories added after real cases
+        # were observed being under-triaged. Each line below is a sample from
+        # a category that previously had zero coverage.
+        "I have a sudden testicle pain",
+        "having a seizure right now",
+        "I accidentally took too many pills",
+        "I have fever and I feel confused since this morning",
+        "I splashed chemical in my eye",
+        "there is loss of bladder control with back pain",
+        "I am diabetic and vomiting a lot, breathing very fast",
+        "I can't speak full sentences and my inhaler isn't helping",
+        "large chemical burn covering my arm",
+        "sudden blurred vision in one eye",
     ],
 )
 def test_red_flags_escalate_to_urgent(text):
@@ -67,6 +80,18 @@ def test_red_flags_escalate_to_urgent(text):
     assert result.risk_state == RiskState.URGENT
     assert result.red_flags
     assert result.eligible_for_draft is False
+
+
+def test_short_of_breath_escalates_to_urgent():
+    """Regression test: 'short of breath' (as opposed to 'shortness of
+    breath') was previously invisible to the matcher — different tokens
+    ('short' vs 'shortness') meant a very common way of describing
+    respiratory distress fell through to LOW_RISK/UNCERTAIN undetected."""
+    result = engine.assess(
+        symptoms=[], associated_symptoms=[], raw_text="I am short of breath", duration="1 hour",
+    )
+    assert result.risk_state == RiskState.URGENT
+    assert "Respiratory Distress" in result.red_flags
 
 
 def test_urgent_takes_priority_over_incomplete_intake():
@@ -104,6 +129,25 @@ def test_fever_with_rash_yields_uncertain():
     result = _complete_case(
         symptoms=["fever", "rash"], raw_text="I have fever and a rash on my arms",
     )
+    assert result.risk_state == RiskState.UNCERTAIN
+
+
+@pytest.mark.parametrize(
+    "symptoms,raw_text,duration",
+    [
+        (["fever", "abdominal pain"], "I have fever and abdominal pain", "2 days"),
+        (["fever", "joint pain"], "I have fever and joint pain", "2 days"),
+        (["cough", "weight loss"], "I have a cough and have lost weight", "20 days"),
+        (["vomiting", "diarrhea"], "I have vomiting and diarrhea", "4 days"),
+        (["headache", "fever", "vomiting"], "I have a headache, fever and vomiting", "1 day"),
+        (["diabetic", "wound"], "I am diabetic and have a wound that won't heal", "10 days"),
+    ],
+)
+def test_uncertain_combinations_yield_uncertain(symptoms, raw_text, duration):
+    """Individually-mild-sounding symptom pairs that are dangerous together
+    (see knowledge/red_flags.json::uncertain_combinations) must not be
+    silently drafted just because no single symptom matched a red flag."""
+    result = _complete_case(symptoms=symptoms, raw_text=raw_text, duration=duration)
     assert result.risk_state == RiskState.UNCERTAIN
 
 

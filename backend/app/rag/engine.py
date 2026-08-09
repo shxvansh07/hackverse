@@ -27,6 +27,40 @@ from app.shared.models import Medication, Prescription, PrescriptionStatus
 
 logger = logging.getLogger(__name__)
 
+#: Minimum top-1 retrieval score to trust a formulary match enough to draft
+#: from it. This is a TF-IDF cosine score, not a calibrated probability — the
+#: number was picked empirically against the ~34-protocol corpus (see
+#: backend/tests/test_rag.py), not derived analytically, and would need
+#: re-checking if the formulary's size or keyword style changes materially.
+MIN_DRAFT_CONFIDENCE = 0.15
+
+#: If the second-best match scores above this fraction of the top match's
+#: score, the two are too close to call — this is exactly the failure mode
+#: that used to make nearly every case draft the same generic protocol
+#: (see PROTO-FEVER-VIRAL's old keyword overlap). Trust neither over the
+#: other; fall through to the no-confident-match path instead.
+MAX_AMBIGUITY_RATIO = 0.70
+
+
+def _ml_corroborates(protocol: Dict[str, Any], ml_hypothesis: Optional[Dict[str, Any]]) -> bool:
+    """True if the ML classifier's condition name overlaps a formulary
+    candidate's own condition name.
+
+    Used only to pick between two already-curated, human-written protocols
+    when TF-IDF alone can't tell them apart — never to introduce a
+    medication of its own. If this returns False, or ml_hypothesis is None,
+    the caller must not draft from `protocol` on this basis.
+    """
+    if not ml_hypothesis:
+        return False
+    ml_condition = ml_hypothesis.get("condition", "").lower()
+    proto_condition = protocol.get("condition", "").lower()
+    if not ml_condition or not proto_condition:
+        return False
+    ml_words = {w for w in ml_condition.replace("(", " ").replace(")", " ").split() if len(w) > 3}
+    proto_words = {w for w in proto_condition.replace("(", " ").replace(")", " ").split() if len(w) > 3}
+    return bool(ml_words & proto_words)
+
 
 class ClinicalRAGEngine:
     """Two indexes: protocols (what to prescribe) and guidance (why)."""
@@ -166,9 +200,34 @@ class ClinicalRAGEngine:
         matched_entries: List[Dict[str, Any]] = []
         ml_hypothesis: Optional[Dict[str, Any]] = None
 
-        if retrieval["protocols"]:
-            top = retrieval["protocols"][0]
-            protocol = top["protocol"]
+        protocols = retrieval["protocols"]
+        confident_protocol: Optional[Dict[str, Any]] = None
+
+        if protocols:
+            top = protocols[0]
+            second = protocols[1] if len(protocols) > 1 else None
+            ambiguous = second is not None and second["score"] > top["score"] * MAX_AMBIGUITY_RATIO
+
+            if top["score"] >= MIN_DRAFT_CONFIDENCE and not ambiguous:
+                confident_protocol = top["protocol"]
+            elif top["score"] >= MIN_DRAFT_CONFIDENCE and ambiguous:
+                # Two candidates are too close for TF-IDF alone to call. Let
+                # the broader ML classifier (patient_backend/ml_predictor.py)
+                # act as a tie-break between them — it may only pick between
+                # protocols a human already wrote, never supply a medication
+                # of its own.
+                ml_hypothesis = predict_condition(
+                    symptoms=list(symptoms),
+                    associated_symptoms=list(associated_symptoms),
+                    free_text=summary,
+                )
+                if _ml_corroborates(top["protocol"], ml_hypothesis):
+                    confident_protocol = top["protocol"]
+                elif _ml_corroborates(second["protocol"], ml_hypothesis):
+                    confident_protocol = second["protocol"]
+
+        if confident_protocol is not None:
+            protocol = confident_protocol
             matched_entries.append(protocol)
             icd10 = protocol.get("icd10", "")
             condition = protocol.get("condition", "")
@@ -186,23 +245,25 @@ class ClinicalRAGEngine:
             if protocol.get("instructions"):
                 instructions_parts.append(protocol["instructions"])
         else:
-            # No protocol matched in the 6-condition curated formulary. Rather
-            # than let a model improvise a medication, the draft stays empty —
-            # but a broader classifier (trained on a real 41-condition public
-            # dataset, see patient_backend/ml_predictor.py) may still offer the
-            # doctor a diagnostic hypothesis. This NEVER adds a medication:
-            # only a condition name, confidence, description and precautions,
+            # No protocol matched confidently. Rather than let a model
+            # improvise a medication, or trust a weak/ambiguous TF-IDF match,
+            # the draft stays empty — but a broader classifier (trained on a
+            # real 41-condition public dataset, see
+            # patient_backend/ml_predictor.py) may still offer the doctor a
+            # diagnostic hypothesis. This NEVER adds a medication: only a
+            # condition name, confidence, description and precautions,
             # surfaced as text for the doctor to read, exactly like the
             # rationale prose already is.
             instructions_parts.append(
-                "No curated protocol matched this presentation. "
+                "No curated protocol matched this presentation with enough confidence. "
                 "No medication has been drafted; clinician assessment required."
             )
-            ml_hypothesis = predict_condition(
-                symptoms=list(symptoms),
-                associated_symptoms=list(associated_symptoms),
-                free_text=summary,
-            )
+            if ml_hypothesis is None:
+                ml_hypothesis = predict_condition(
+                    symptoms=list(symptoms),
+                    associated_symptoms=list(associated_symptoms),
+                    free_text=summary,
+                )
             if ml_hypothesis:
                 instructions_parts.append(
                     f"For reference only, a statistical classifier trained on a public "

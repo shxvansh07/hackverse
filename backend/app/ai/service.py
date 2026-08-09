@@ -152,6 +152,37 @@ class AIService:
             logger.warning("Extraction from %s failed schema validation", response.provider)
             return None
 
+    async def extract_from_consultation(
+        self, exchange_lines: List[str]
+    ) -> Optional[ExtractedClinicalInfo]:
+        """Structured extraction from a finished live-consultation transcript.
+
+        Separate from extract_clinical_info(): that method is framed around
+        one latest patient message plus history, and its cardinal rule is
+        "only what the patient said". A consultation transcript has two
+        speakers and a doctor's own spoken findings count as facts too, so
+        this uses its own prompt rather than reusing that one. Same
+        None-means-no-op contract as extract_clinical_info.
+        """
+        response = await self._complete(
+            prompts.build_consultation_extraction_messages(exchange_lines),
+            json_mode=True, temperature=0.0, max_tokens=600,
+        )
+        if response is None:
+            return None
+
+        try:
+            payload = extract_json_object(response.text)
+        except ValueError:
+            logger.warning("Consultation extraction from %s was not valid JSON", response.provider)
+            return None
+
+        try:
+            return ExtractedClinicalInfo.model_validate(payload)
+        except ValidationError:
+            logger.warning("Consultation extraction from %s failed schema validation", response.provider)
+            return None
+
     async def generate_reply(
         self,
         patient_message: str,

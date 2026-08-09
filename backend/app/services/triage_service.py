@@ -315,11 +315,12 @@ class TriageService:
             }
 
         # --- intake completion ---------------------------------------------
-        has_symptoms = bool(case.symptoms or case.chief_complaint)
+        # Only a "no" to the closing question ends intake. Ending on ANY "no"
+        # (e.g. "no allergies") would skip the rest of history-taking and
+        # complete before all fixed-order questions have been asked — see
+        # test_intake_completes_with_zero_llm_providers.
         awaiting_closing_question = awaiting_field == "anything_else"
-        
-        # Complete if patient expresses negative/finished signal and we have symptoms (or 2+ turns)
-        intake_complete = (denies_more and (has_symptoms or len(case.transcript) >= 3)) or (denies_more and awaiting_closing_question)
+        intake_complete = denies_more and awaiting_closing_question
 
         if intake_complete:
             reply = fq.handoff_message(lang)
