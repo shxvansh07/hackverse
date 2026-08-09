@@ -538,14 +538,18 @@ class ClinicalStore:
         """
         from app.shared.auth import hash_password  # local import avoids a load-time cycle
 
-        def _seed(doctor_id: str, username: str, password: str, name: str, qualification: str, registration_no: str) -> None:
+        def _seed(
+            doctor_id: str, username: str, password: str, name: str, qualification: str,
+            registration_no: str, years_experience: int = 0, specialty: str = "",
+        ) -> None:
             if username.strip().lower() in self.doctor_username_index:
                 return
             password_hash, password_salt = hash_password(password)
             self.doctors[doctor_id] = Doctor(
                 doctor_id=doctor_id, username=username, password_hash=password_hash,
                 password_salt=password_salt, name=name, qualification=qualification,
-                registration_no=registration_no,
+                registration_no=registration_no, years_experience=years_experience,
+                specialty=specialty,
             )
             self.doctor_username_index[username.strip().lower()] = doctor_id
 
@@ -555,10 +559,19 @@ class ClinicalStore:
             os.getenv("DOCTOR_PASSWORD", "doctorpassword123"),
             os.getenv("DOCTOR_NAME", "Dr. Sharma, MD"),
             "MBBS, MD (General Medicine)", "KMC/00000/2026",
+            years_experience=14, specialty="General Medicine",
         )
         if include_demo_extras:
-            _seed("DR-102", "dr.mehta", "demopassword123", "Dr. Mehta, MD", "MBBS, MD (Pediatrics)", "KMC/00001/2026")
-            _seed("DR-103", "dr.rao", "demopassword123", "Dr. Rao, MD", "MBBS, DM (Cardiology)", "KMC/00002/2026")
+            _seed(
+                "DR-102", "dr.mehta", "demopassword123", "Dr. Mehta, MD",
+                "MBBS, MD (Pediatrics)", "KMC/00001/2026",
+                years_experience=6, specialty="Pediatrics",
+            )
+            _seed(
+                "DR-103", "dr.rao", "demopassword123", "Dr. Rao, MD",
+                "MBBS, DM (Cardiology)", "KMC/00002/2026",
+                years_experience=11, specialty="Cardiology",
+            )
         self._save()
 
     def _seed_demo(self) -> None:

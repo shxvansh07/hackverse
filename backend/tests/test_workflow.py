@@ -301,6 +301,79 @@ def test_first_time_patient_has_no_history_context():
     assert "history_context" not in case.grounding
 
 
+def test_similar_past_cases_surface_across_different_patients():
+    """Two unrelated (no phone, no shared profile) patients with a similar,
+    finalized presentation should show up as decision support on a third
+    similar case — the cross-patient counterpart to history_context, which
+    only ever looks at one patient's own past visits."""
+    headers = auth_headers()
+
+    _, case1_id = _complete_low_risk_intake()
+    approve1 = client.post(
+        f"/api/doctor/cases/{case1_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve1.status_code == 200
+
+    _, case2_id = _complete_low_risk_intake()
+    approve2 = client.post(
+        f"/api/doctor/cases/{case2_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve2.status_code == 200
+
+    _, case3_id = _complete_low_risk_intake()
+    case1 = db.get_case(case1_id)
+    case3 = db.get_case(case3_id)
+    assert case1.patient_id != case3.patient_id  # genuinely different patients
+
+    similar = case3.grounding.get("similar_cases")
+    assert similar
+    for entry in similar:
+        # Never patient identity — only clinical content and doctor attribution.
+        assert "patient_id" not in entry
+        assert "patient_name" not in entry
+        assert entry["diagnosis"]
+        assert entry["doctor_name"]
+
+
+def test_similar_cases_excludes_the_same_patient():
+    """A patient's own prior visits must never appear in their own
+    similar_cases — that's history_context's job, not this one's."""
+    phone = "9876500099"
+    _, case1_id = _complete_low_risk_intake_with_phone(phone, symptom="fever")
+    headers = auth_headers()
+    approve = client.post(
+        f"/api/doctor/cases/{case1_id}/decision",
+        json={"decision": "APPROVE", "notes": "Reviewed."},
+        headers=headers,
+    )
+    assert approve.status_code == 200
+
+    _, case2_id = _complete_low_risk_intake_with_phone(phone, symptom="fever")
+    case2 = db.get_case(case2_id)
+    # No OTHER patient has a matching finalized case in this clean store, so
+    # the only possible match would be the same patient's own prior visit —
+    # which must be excluded, leaving similar_cases empty.
+    assert not case2.grounding.get("similar_cases")
+
+
+def test_login_returns_the_real_account_identity():
+    """Login reflects the actual registered account, including the
+    self-reported years_experience/specialty used for SimilarCase
+    attribution — no directory selector, no per-login identity choice."""
+    resp = client.post(
+        "/api/auth/doctor/login", json={"username": DOCTOR_USER, "password": DOCTOR_PASS}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["doctor_id"] == "DR-101"
+    assert body["doctor_name"] == "Dr. Sharma, MD"
+    assert body["years_experience"] == 14
+
+
 def test_approved_prescription_reaches_the_patient():
     session_id, case_id = _complete_low_risk_intake()
     headers = auth_headers()

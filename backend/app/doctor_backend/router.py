@@ -82,6 +82,7 @@ def doctor_register(payload: DoctorRegisterRequest):
         register_doctor(
             payload.username, payload.password, payload.name,
             payload.qualification, payload.registration_no,
+            payload.years_experience, payload.specialty,
         )
     except DuplicateUsernameError:
         raise HTTPException(status_code=409, detail="That username is already taken")

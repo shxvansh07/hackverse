@@ -165,6 +165,14 @@ class CaseService:
 
         db.save_prescription(prescription)
         case.prescription_id = prescription.prescription_id
+
+        # Advisory decision-support only — deliberately computed after the
+        # draft is final and never fed back into it. A similar case belongs
+        # to a different patient, so unlike history_context it must never
+        # influence this patient's own medication matching.
+        similar_cases = RecordService.find_similar_cases(case)
+        if similar_cases:
+            grounding["similar_cases"] = [c.model_dump() for c in similar_cases]
         case.grounding = grounding
 
         db.record_audit(

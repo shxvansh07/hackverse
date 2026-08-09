@@ -19,6 +19,7 @@ import {
   type CaseDetail,
   type DecisionType,
   type Medication,
+  type SimilarCase,
   type TriageCase,
 } from '@/lib/api';
 import {
@@ -1126,6 +1127,42 @@ function CaseReview({
           )}
         </div>
       </section>
+
+      {/* ---------------------------------------------------- similar cases */}
+      {Array.isArray(grounding?.similar_cases) && grounding.similar_cases.length > 0 && (
+        <section className="border-b border-rule px-8 py-6">
+          <SectionTitle note="De-identified · other patients">Similar past cases</SectionTitle>
+          <ul className="mt-4 space-y-3">
+            {(grounding.similar_cases as SimilarCase[]).map((sc, index) => (
+              <li key={index} className="border border-rule bg-surface px-4 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-[14px] font-medium text-ink">
+                    {sc.chief_complaint || 'Unspecified complaint'} → {sc.diagnosis}
+                  </p>
+                  {sc.was_modified_from_ai_draft && (
+                    <span className="text-[11px] uppercase tracking-[0.1em] text-draft">
+                      Doctor modified the AI suggestion
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-[13px] text-ink-muted">
+                  {sc.medications.join(', ') || 'No medication on record'}
+                </p>
+                <p className="mt-1 text-[12px] text-ink-faint">
+                  {sc.doctor_name}
+                  {sc.doctor_years_experience != null && ` · ${sc.doctor_years_experience} yrs`}
+                  {sc.approved_at && ` · ${new Date(sc.approved_at).toLocaleDateString()}`}
+                </p>
+                {sc.doctor_notes && (
+                  <p className="mt-2 text-[13px] italic leading-relaxed text-ink-muted">
+                    “{sc.doctor_notes}”
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* ------------------------------------------------ actions always visible */}
       <div className="fixed inset-x-0 bottom-0 left-[360px] border-t border-rule bg-paper/95 px-8 py-4 backdrop-blur">

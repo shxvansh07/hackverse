@@ -17,6 +17,8 @@ export default function DoctorLoginPage() {
   const [name, setName] = useState('');
   const [qualification, setQualification] = useState('');
   const [registrationNo, setRegistrationNo] = useState('');
+  const [yearsExperience, setYearsExperience] = useState('');
+  const [specialty, setSpecialty] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,7 +35,15 @@ export default function DoctorLoginPage() {
       if (mode === 'login') {
         await api.doctorLogin(username, password);
       } else {
-        await api.doctorRegister({ username, password, name, qualification, registrationNo });
+        await api.doctorRegister({
+          username,
+          password,
+          name,
+          qualification,
+          registrationNo,
+          yearsExperience: yearsExperience ? Number(yearsExperience) : undefined,
+          specialty,
+        });
       }
       router.replace('/doctor');
     } catch (err) {
@@ -114,6 +124,28 @@ export default function DoctorLoginPage() {
                   className="field mt-1.5"
                 />
               </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="label-meta">Years experience (optional)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={yearsExperience}
+                    onChange={(e) => setYearsExperience(e.target.value)}
+                    placeholder="e.g. 6"
+                    className="field mt-1.5"
+                  />
+                </label>
+                <label className="block">
+                  <span className="label-meta">Specialty (optional)</span>
+                  <input
+                    value={specialty}
+                    onChange={(e) => setSpecialty(e.target.value)}
+                    placeholder="e.g. Pediatrics"
+                    className="field mt-1.5"
+                  />
+                </label>
+              </div>
             </>
           )}
 

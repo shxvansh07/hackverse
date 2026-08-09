@@ -509,6 +509,25 @@ class DoctorLoginResponse(BaseModel):
     doctor_id: str
     doctor_name: str
     expires_at: str
+    years_experience: Optional[int] = None
+
+
+class SimilarCase(BaseModel):
+    """A de-identified peer case surfaced as decision support: what a similar
+    presentation was diagnosed as and treated with, and by whom — professional
+    attribution, never patient identity. No patient_id, name, phone, age or
+    any other field that could identify the patient it came from is ever
+    included here, by construction (see RecordService.find_similar_cases)."""
+
+    similarity_score: float
+    chief_complaint: str
+    diagnosis: str
+    medications: List[str]
+    doctor_name: str
+    doctor_years_experience: Optional[int] = None
+    was_modified_from_ai_draft: bool
+    doctor_notes: Optional[str] = None
+    approved_at: Optional[str] = None
 
 
 class Doctor(BaseModel):
@@ -523,6 +542,11 @@ class Doctor(BaseModel):
     name: str
     qualification: str = ""
     registration_no: str = ""
+    #: Both optional and self-reported at registration — display context for
+    #: SimilarCase attribution (RecordService.find_similar_cases), nothing
+    #: safety-relevant ever depends on either.
+    years_experience: int = 0
+    specialty: str = ""
     created_at: str = Field(default_factory=_now)
 
 
@@ -532,6 +556,8 @@ class DoctorRegisterRequest(BaseModel):
     name: str = Field(..., min_length=1)
     qualification: str = ""
     registration_no: str = ""
+    years_experience: int = 0
+    specialty: str = ""
 
 
 class BookAppointmentRequest(BaseModel):

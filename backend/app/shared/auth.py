@@ -14,18 +14,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Header, HTTPException, status
 
 _TOKEN_TTL_HOURS = 12
 
-#: token -> {doctor_id, doctor_name, expires_at}
-_ACTIVE_TOKENS: Dict[str, Dict[str, str]] = {}
+#: token -> {doctor_id, doctor_name, years_experience, expires_at}
+_ACTIVE_TOKENS: Dict[str, Dict[str, Any]] = {}
 
 #: Brute-force protection on login. Keyed by the attempted username rather
 #: than an IP address — the router has no request context to hand this
@@ -78,6 +77,7 @@ def verify_password(password: str, password_hash: str, password_salt: str) -> bo
 
 def register_doctor(
     username: str, password: str, name: str, qualification: str = "", registration_no: str = "",
+    years_experience: int = 0, specialty: str = "",
 ):
     """Create a new doctor account. Raises DuplicateUsernameError if taken —
     the router turns that into a 409, same pattern as every other conflict
@@ -92,8 +92,24 @@ def register_doctor(
     doctor = Doctor(
         username=username, password_hash=password_hash, password_salt=password_salt,
         name=name, qualification=qualification, registration_no=registration_no,
+        years_experience=years_experience, specialty=specialty,
     )
     return db.save_doctor(doctor)
+
+
+def get_doctor_profile(doctor_id: str) -> Optional[Dict[str, object]]:
+    """Public-safe display fields for one doctor — used by
+    RecordService.find_similar_cases to attribute a peer case without
+    exposing credentials. No password fields, ever."""
+    from app.shared.database import db  # local import avoids a load-time cycle
+
+    doctor = db.get_doctor(doctor_id)
+    if not doctor:
+        return None
+    return {
+        "doctor_id": doctor.doctor_id, "name": doctor.name,
+        "years_experience": doctor.years_experience, "specialty": doctor.specialty,
+    }
 
 
 def _lockout_remaining_seconds(key: str) -> int:
@@ -109,7 +125,7 @@ def _record_failure(key: str) -> None:
     _FAILED_ATTEMPTS.setdefault(key, []).append(time.time())
 
 
-def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
+def authenticate(username: str, password: str) -> Optional[Dict[str, Any]]:
     from app.shared.database import db  # local import avoids a load-time cycle
 
     lockout_key = (username or "").strip().lower() or "unknown"
@@ -137,6 +153,7 @@ def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     record = {
         "doctor_id": doctor.doctor_id,
         "doctor_name": doctor.name,
+        "years_experience": doctor.years_experience,
         "expires_at": expires_at,
         "token": token,
     }
@@ -144,7 +161,7 @@ def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     return record
 
 
-def resolve_token(token: str) -> Optional[Dict[str, str]]:
+def resolve_token(token: str) -> Optional[Dict[str, Any]]:
     record = _ACTIVE_TOKENS.get(token)
     if not record:
         return None
@@ -154,7 +171,7 @@ def resolve_token(token: str) -> Optional[Dict[str, str]]:
     return record
 
 
-async def require_doctor(authorization: Optional[str] = Header(default=None)) -> Dict[str, str]:
+async def require_doctor(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     """FastAPI dependency guarding every doctor endpoint."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(

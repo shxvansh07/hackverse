@@ -250,6 +250,21 @@ export interface PatientHistoryItem {
   has_consultation: boolean;
 }
 
+/** A de-identified peer case surfaced as decision support — clinical content
+ *  and doctor attribution only, never patient identity. See backend
+ *  RecordService.find_similar_cases. */
+export interface SimilarCase {
+  similarity_score: number;
+  chief_complaint: string;
+  diagnosis: string;
+  medications: string[];
+  doctor_name: string;
+  doctor_years_experience: number | null;
+  was_modified_from_ai_draft: boolean;
+  doctor_notes: string | null;
+  approved_at: string | null;
+}
+
 export interface PatientSession {
   session_id: string;
   patient_id: string;
@@ -550,6 +565,7 @@ export const api = {
   async doctorLogin(username: string, password: string) {
     const data = await request<{
       token: string; doctor_id: string; doctor_name: string; expires_at: string;
+      years_experience: number | null;
     }>('/api/auth/doctor/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
@@ -567,9 +583,12 @@ export const api = {
     name: string;
     qualification?: string;
     registrationNo?: string;
+    yearsExperience?: number;
+    specialty?: string;
   }) {
     const data = await request<{
       token: string; doctor_id: string; doctor_name: string; expires_at: string;
+      years_experience: number | null;
     }>('/api/auth/doctor/register', {
       method: 'POST',
       body: JSON.stringify({
@@ -578,6 +597,8 @@ export const api = {
         name: fields.name,
         qualification: fields.qualification || '',
         registration_no: fields.registrationNo || '',
+        years_experience: fields.yearsExperience || 0,
+        specialty: fields.specialty || '',
       }),
     });
     if (typeof window !== 'undefined') {
