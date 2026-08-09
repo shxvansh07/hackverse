@@ -351,6 +351,13 @@ export default function PatientPage() {
         <div className="mx-auto max-w-2xl px-5 pb-3">
           <StatusRail current={patientStatus} />
         </div>
+
+        {/* Transcript dissolves into the header instead of being sheared off
+            by its edge as it scrolls underneath. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-full h-10 bg-gradient-to-b from-paper to-transparent"
+        />
       </header>
 
       <main className="mx-auto max-w-2xl px-5 pb-32 pt-6 print:max-w-none print:p-0">
@@ -511,50 +518,110 @@ function Conversation({
 }) {
   const visible = messages.filter((m) => m.text.trim() && m.text !== '​');
 
-  return (
-    <div className="space-y-6">
-      <div className="space-y-5">
-        {visible.map((message, index) => (
-          <div
-            key={`${message.timestamp}-${index}`}
-            className={cx(
-              'animate-rise',
-              message.sender === 'patient' ? 'flex justify-end' : 'flex justify-start',
-            )}
-          >
-            <div className={cx('max-w-[85%]', message.sender === 'patient' && 'text-right')}>
-              <span className="label-meta">
-                {message.sender === 'patient' ? 'You' : 'Assistant'}
-              </span>
-              <p
-                lang={message.sender === 'ai' ? language?.code : undefined}
-                className={cx(
-                  'mt-1.5 whitespace-pre-wrap px-4 py-3 text-[16px] leading-relaxed',
-                  message.sender === 'patient'
-                    ? 'border border-rule bg-surface-sunken text-ink'
-                    : 'border-l-2 border-accent bg-surface text-ink',
-                )}
-              >
-                {message.text}
-              </p>
-            </div>
-          </div>
-        ))}
+  // An intake interview only ever asks for one answer at a time, so the
+  // newest question gets the page and everything before it recedes into a
+  // quiet transcript. Splitting on the last assistant turn (rather than
+  // simply taking the last message) keeps the patient's just-sent reply
+  // sitting under the question it answers while the next one is fetched.
+  let askedAt = -1;
+  for (let i = visible.length - 1; i >= 0; i -= 1) {
+    if (visible[i].sender === 'ai') {
+      askedAt = i;
+      break;
+    }
+  }
+  const question = askedAt >= 0 ? visible[askedAt] : null;
+  const history = askedAt >= 0 ? visible.slice(0, askedAt) : visible;
+  const answered = askedAt >= 0 ? visible.slice(askedAt + 1) : [];
 
-        {sending && (
-          <div className="flex justify-start animate-rise">
-            <div className="border-l-2 border-rule px-4 py-3">
-              <Spinner label="Thinking" />
-            </div>
-          </div>
-        )}
-        <div ref={transcriptEndRef} />
-      </div>
+  return (
+    <div className="space-y-10">
+      {history.length > 0 && (
+        <ol className="space-y-4">
+          {history.map((message, index) => (
+            <PastTurn key={`${message.timestamp}-${index}`} message={message} language={language} />
+          ))}
+        </ol>
+      )}
+
+      {question && (
+        <div
+          // Keyed on the question itself so a new one remounts and replays the
+          // CSS enter animation; without the key React would diff the text in
+          // place and the change would pass unnoticed.
+          key={question.timestamp}
+          className="animate-rise"
+        >
+          <p className="label-meta" aria-hidden>
+            Assistant
+          </p>
+          <p
+            lang={language?.code}
+            aria-live="polite"
+            className="question mt-3 whitespace-pre-wrap"
+          >
+            {question.text}
+          </p>
+        </div>
+      )}
+
+      {answered.length > 0 && (
+        <ol className="space-y-4">
+          {answered.map((message, index) => (
+            <PastTurn key={`${message.timestamp}-${index}`} message={message} language={language} />
+          ))}
+        </ol>
+      )}
+
+      {sending && (
+        <div className="flex justify-start">
+          <Spinner label="Thinking" />
+        </div>
+      )}
+
+      <div ref={transcriptEndRef} />
 
       {error && (
         <ErrorNotice message={error} onRetry={lastFailedMessage ? onRetry : undefined} />
       )}
     </div>
+  );
+}
+
+/**
+ * One settled turn in the transcript above the live question.
+ *
+ * The reveal is a CSS scroll timeline (`.turn-reveal`) rather than anything
+ * driven from here: the transcript scrolls itself to the newest turn, so an
+ * IntersectionObserver entrance almost never fires — measured, it fired on
+ * none of ten turns — and a motion library costs 35kB on the screen a patient
+ * loads first. Where view timelines are unsupported the turn simply renders,
+ * which is the only acceptable failure mode for clinical text.
+ */
+function PastTurn({
+  message,
+  language,
+}: {
+  message: ChatMessage;
+  language: Language | null;
+}) {
+  const fromPatient = message.sender === 'patient';
+
+  return (
+    <li className={cx('turn-reveal flex', fromPatient ? 'justify-end' : 'justify-start')}>
+      <div className={cx('max-w-[85%]', fromPatient && 'text-right')}>
+        <span className="sr-only">{fromPatient ? 'You said' : 'Assistant asked'}</span>
+        <p
+          lang={fromPatient ? undefined : language?.code}
+          className={cx(
+            'whitespace-pre-wrap text-[15px] leading-relaxed',
+            fromPatient ? 'text-ink' : 'border-l-2 border-rule pl-3 text-ink-muted',
+          )}
+        >
+          {message.text}
+        </p>
+      </div>
+    </li>
   );
 }
 
