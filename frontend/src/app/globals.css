@@ -1,0 +1,187 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Clinical design system.
+
+  Restraint is the brief: this is a product where a doctor makes prescribing
+  decisions under time pressure and a patient reads dosing instructions. Colour
+  therefore carries meaning rather than decoration — there is exactly one accent
+  hue, and the three risk states own their colours outright so nothing else in
+  the interface can compete with them.
+
+  Type is an editorial scale on a near-white ground: generous leading, real
+  hierarchy, hairline rules instead of boxes and shadows.
+*/
+
+@layer base {
+  :root {
+    --paper: 0 0% 99%;
+    --surface: 0 0% 100%;
+    --surface-sunken: 210 20% 98%;
+
+    --ink: 215 28% 10%;
+    --ink-muted: 215 14% 42%;
+    --ink-faint: 215 12% 58%;
+
+    --rule: 215 16% 90%;
+    --rule-strong: 215 14% 82%;
+
+    --accent: 201 96% 26%;
+    --accent-soft: 201 90% 96%;
+
+    /* Risk states. Reserved — never reused for anything else. */
+    --risk-low: 152 58% 26%;
+    --risk-low-soft: 152 50% 96%;
+    --risk-uncertain: 35 82% 32%;
+    --risk-uncertain-soft: 38 88% 96%;
+    --risk-urgent: 358 68% 42%;
+    --risk-urgent-soft: 358 80% 97%;
+
+    /* AI-draft labelling. Deliberately distinct from every risk colour so
+       "this is unapproved" can never be confused with "this is safe". */
+    --draft: 268 44% 40%;
+    --draft-soft: 268 60% 97%;
+
+    --radius: 4px;
+
+    /* Indic faces are listed explicitly so patient-language text renders on
+       every platform instead of falling back to tofu. */
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, 'Noto Sans', 'Noto Sans Devanagari',
+      'Noto Sans Bengali', 'Noto Sans Tamil', 'Noto Sans Telugu',
+      'Noto Sans Gujarati', 'Noto Sans Kannada', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
+  }
+
+  * {
+    border-color: hsl(var(--rule));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: hsl(var(--paper));
+    color: hsl(var(--ink));
+    font-feature-settings: "kern" 1, "liga" 1, "cv11" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Indic scripts sit differently on the baseline and need more room. */
+  :lang(hi), :lang(bn), :lang(mr), :lang(ta), :lang(te), :lang(gu), :lang(kn) {
+    line-height: 1.85;
+  }
+
+  ::selection {
+    background-color: hsl(var(--accent-soft));
+    color: hsl(var(--accent));
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 2px;
+  }
+}
+
+/* Printable prescription (patient/page.tsx's PrintablePrescription).
+   Everything else on the page carries `print:hidden`; this is the one
+   thing meant to survive to paper/PDF. Kept outside @layer so it always
+   wins regardless of Tailwind's cascade layer ordering. */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+
+  body {
+    background: white;
+  }
+}
+
+@layer components {
+  /* Small caps label used for metadata keys throughout both interfaces. */
+  .label-meta {
+    @apply text-[11px] font-medium uppercase tracking-[0.12em] text-ink-faint;
+  }
+
+  .rule {
+    @apply border-t border-rule;
+  }
+
+  .card {
+    @apply border border-rule bg-surface;
+  }
+
+  .field {
+    @apply w-full border border-rule bg-surface px-3 py-2 text-[15px]
+           text-ink placeholder:text-ink-faint
+           focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 border px-4 py-2
+           text-sm font-medium transition-colors
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn border-ink bg-ink text-white hover:bg-ink/90;
+  }
+
+  .btn-secondary {
+    @apply btn border-rule-strong bg-surface text-ink hover:bg-surface-sunken;
+  }
+
+  .btn-danger {
+    @apply btn border-risk-urgent bg-surface text-risk-urgent hover:bg-risk-urgent-soft;
+  }
+}
+
+@layer utilities {
+  /* Chat transcript can grow unbounded; a hairline scrollbar keeps the
+     clinical surfaces from acquiring chrome. */
+  .scroll-hairline {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--rule-strong)) transparent;
+  }
+  .scroll-hairline::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-hairline::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--rule-strong));
+  }
+  .scroll-hairline::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-rise {
+    animation: rise 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.25; }
+    50%      { opacity: 1; }
+  }
+  .animate-pulse-dot {
+    animation: pulse-dot 1.2s ease-in-out infinite;
+  }
+
+  /* Respect users who have asked the OS for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-rise,
+    .animate-pulse-dot {
+      animation: none;
+    }
+  }
+}
