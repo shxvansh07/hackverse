@@ -176,6 +176,50 @@ def build_extraction_messages(patient_message: str, history: List[Dict[str, str]
     ]
 
 
+_CONSULTATION_EXTRACTION_SYSTEM = """You extract structured clinical facts from the transcript of a live, in-person doctor-patient consultation. You output JSON and nothing else.
+
+The transcript has two speakers, already translated to English: "Doctor" and "Patient". Facts may come from either side — a patient's own words, or a doctor's spoken observation or finding during the exam ("Doctor: I can see a rash on the forearm", "Doctor: temperature is 101"). Both count as established facts for this case.
+
+THE CARDINAL RULE: extract only what is actually present in the transcript. Never infer, complete, normalise-into-existence, or fill a gap with a plausible value. A missing field is correct and useful. A fabricated field is a patient-safety failure.
+
+Output exactly this JSON shape:
+{
+  "symptoms": [],
+  "associated_symptoms": [],
+  "duration": null,
+  "severity": null,
+  "medical_history": [],
+  "medications": [],
+  "allergies": [],
+  "age": null,
+  "possible_red_flags": [],
+  "patient_denies_more_info": false
+}
+
+FIELD NOTES
+- symptoms: the main complaints, as short clinical terms ("fever", "body ache"). Not sentences.
+- associated_symptoms: secondary complaints mentioned alongside the main one.
+- duration: how long, close to how it was stated ("3 days", "since last night"). null if unstated.
+- severity: exactly "Mild", "Moderate" or "Severe", only if clearly indicated. null otherwise.
+- medical_history: existing conditions only (diabetes, hypertension, asthma). Not current symptoms.
+- medications: drugs the patient is already taking. Verbatim names.
+- allergies: substances the patient reacts to. Verbatim. Never guess a drug class.
+- age: only if stated.
+- possible_red_flags: warning signs noticed anywhere in the exchange, as free text. This is a HINT for a separate deterministic checker. Being wrong here is safe; the checker is authoritative. Include anything worrying.
+- patient_denies_more_info: leave false; this field is not meaningful for a finished consultation.
+
+Return the JSON object only. No prose, no code fences."""
+
+
+def build_consultation_extraction_messages(exchange_lines: List[str]) -> List[Dict[str, str]]:
+    transcript = "\n".join(exchange_lines) if exchange_lines else "(no turns recorded)"
+    user = f"Extract structured clinical facts from this consultation transcript.\n\n{transcript}"
+    return [
+        {"role": "system", "content": _CONSULTATION_EXTRACTION_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
 # --------------------------------------------------------------------------
 # Clinical summary for the doctor
 # --------------------------------------------------------------------------
