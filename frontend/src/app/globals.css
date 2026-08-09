@@ -110,27 +110,6 @@
     @apply text-[11px] font-medium uppercase tracking-[0.12em] text-ink-faint;
   }
 
-  /* The live intake question. Sized up because it is the only thing on the
-     screen the patient has to act on — everything above it is transcript. */
-  .question {
-    @apply text-ink;
-    font-size: clamp(1.25rem, 1.05rem + 1vw, 1.6rem);
-    line-height: 1.38;
-    letter-spacing: -0.014em;
-    text-wrap: balance;
-  }
-
-  /* The base layer gives Indic scripts 1.85 leading; `.question` sits in a
-     later cascade layer and would otherwise win with a value tuned for
-     Latin, crowding their ascenders at this size. Restore the headroom and
-     drop the negative tracking, which Devanagari conjuncts do not take. */
-  .question:lang(hi), .question:lang(bn), .question:lang(mr),
-  .question:lang(ta), .question:lang(te), .question:lang(gu),
-  .question:lang(kn) {
-    line-height: 1.6;
-    letter-spacing: 0;
-  }
-
   .rule {
     @apply border-t border-rule;
   }
@@ -190,30 +169,6 @@
     animation: rise 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  /* Scroll reveal for settled transcript turns.
-     Driven by a view timeline so the fade tracks the scroll position itself
-     rather than a one-shot trigger — scrubbing back up through the history
-     replays it, which a mount or intersection animation cannot do.
-     Deliberately wrapped in @supports: where view timelines are missing the
-     turn just renders, and no clinical text is ever hidden behind an
-     animation that never ran. */
-  @keyframes turn-reveal {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: none; }
-  }
-
-  @supports (animation-timeline: view()) {
-    @media (prefers-reduced-motion: no-preference) {
-      .turn-reveal {
-        animation: turn-reveal linear both;
-        animation-timeline: view();
-        /* Complete well before the turn is centred, so text is fully legible
-           for most of its time on screen. */
-        animation-range: entry 0% entry 40%;
-      }
-    }
-  }
-
   @keyframes pulse-dot {
     0%, 100% { opacity: 0.25; }
     50%      { opacity: 1; }
@@ -227,15 +182,6 @@
     .animate-rise,
     .animate-pulse-dot {
       animation: none;
-    }
-
-    /* The scroll reveal is already gated on no-preference above; this is the
-       belt-and-braces reset in case the turn picked up the animation before
-       the query flipped. */
-    .turn-reveal {
-      animation: none;
-      opacity: 1;
-      transform: none;
     }
   }
 }

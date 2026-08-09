@@ -40,12 +40,18 @@ from app.shared.models import (
 logger = logging.getLogger(__name__)
 
 #: Explicit "nothing further" signals across supported languages.
+#:
+#: Denials only. Acknowledgements — "ok", "okay", "thank you", "thanks" —
+#: are deliberately absent: a patient saying "ok" to a question is agreeing
+#: to keep going, not declining to say more, and reading them as denials
+#: both ended the interview early and let apply_negative_confirmation record
+#: a "no" against whichever clinical field happened to be pending.
 _NEGATIVE_PATTERNS = [
     r"\bno\b", r"\bnope\b", r"\bnone\b", r"\bnothing\b", r"\bnothing else\b",
     r"\bthat'?s all\b", r"\bthats all\b", r"\bthat'?s it\b", r"\bthats it\b",
     r"\bthat will be it\b", r"\bthat is all\b", r"\bthat is it\b",
     r"\bno more\b", r"\bno other\b", r"\bno thank you\b", r"\bno thanks\b",
-    r"\bthank you\b", r"\bthanks\b", r"\bok\b", r"\bokay\b", r"\ball good\b",
+    r"\ball good\b",
     r"\bnahi\b", r"\bnahin\b", r"\bnai\b", r"\bbas\b", r"\bbas itna\b",
     "नहीं", "नही", "कुछ नहीं", "बस", "और कुछ नहीं",
     "இல்லை", "లేదు", "இல்ல", "ના", "নেই", "নাই",
@@ -313,18 +319,34 @@ class TriageService:
             }
 
         # --- intake completion ---------------------------------------------
-        has_symptoms = bool(case.symptoms or case.chief_complaint)
+        # A "no" mid-interview only answers whatever factual question was
+        # just asked (see apply_negative_confirmation) — it must not also end
+        # the whole conversation. Completion requires the *closing* question
+        # specifically (fallback_questions.QUESTION_ORDER always asks it
+        # last), so the patient always gets asked "anything else, or should I
+        # send this to your doctor?" before handoff, rather than the
+        # interview ending abruptly on an early "no allergies".
+        #
+        # Deliberately not also gated on `blocking` (unfilled required
+        # fields): if a required field genuinely never got answered, the
+        # safety engine already routes that case to UNCERTAIN rather than
+        # LOW_RISK on its own (see safety/engine.py), so it still reaches a
+        # doctor rather than auto-drafting. Requiring it here too would let a
+        # single stuck field loop the closing question forever instead of
+        # ending the conversation.
         awaiting_closing_question = awaiting_field == "anything_else"
-        
-        # Complete if patient expresses negative/finished signal and we have symptoms (or 2+ turns)
-        intake_complete = (denies_more and (has_symptoms or len(case.transcript) >= 3)) or (denies_more and awaiting_closing_question)
+        intake_complete = denies_more and awaiting_closing_question
 
         if intake_complete:
             reply = fq.handoff_message(lang)
             case.transcript.append(ChatMessage(sender="ai", text=reply))
             session.status = PatientStatus.ASSESSING
-            case.allergies_confirmed = True
-            case.history_confirmed = True
+            # allergies_confirmed / history_confirmed are NOT set here. They
+            # mean "the patient was asked and answered", and reaching the end
+            # of the interview is not an answer. Marking them on handoff told
+            # the safety engine a required field was established when it had
+            # never been raised, which is enough on its own to carry a case to
+            # LOW_RISK and auto-draft against an unknown allergy status.
             db.save_case(case)
             db.save_session(session)
             return {
@@ -344,26 +366,17 @@ class TriageService:
         )
 
         if not reply:
+            # AI unreachable or repeating itself: deterministic bank keeps the
+            # interview moving rather than dead-ending the patient.
             reply = fq.next_question(lang, previously_asked)
 
-        # Catch if generated reply indicates handoff/completion to avoid infinite question loops
-        reply_lower = reply.lower()
-        handoff_keywords = [
-            "doctor know", "speak with them", "wrap up", "hand off", "handoff",
-            "send this to your doctor", "let the doctor", "send your details",
-            "logged all your information", "ready now", "ready to speak"
-        ]
-        if any(kw in reply_lower for kw in handoff_keywords):
-            case.transcript.append(ChatMessage(sender="ai", text=reply))
-            session.status = PatientStatus.ASSESSING
-            case.allergies_confirmed = True
-            case.history_confirmed = True
-            db.save_case(case)
-            db.save_session(session)
-            return {
-                "reply": reply, "is_complete": True,
-                "assessment": assessment, "urgent": False,
-            }
+        # Intake is not ended by matching phrases in the model's own prose.
+        # Whether the interview is over is a fact about which questions have
+        # been asked and answered, and the model does not know that — it was
+        # ending intake whenever it happened to write "let the doctor" or
+        # "wrap up", which is exactly the "step 4 never reads a model's
+        # opinion" rule this module opens with. The fixed question order plus
+        # the closing-question gate above is what terminates the interview.
 
         case.transcript.append(ChatMessage(sender="ai", text=reply))
         session.status = PatientStatus.COLLECTING_INFORMATION
