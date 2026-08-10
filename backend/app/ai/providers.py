@@ -12,7 +12,9 @@ Adding a vendor is a subclass plus a registry entry in service.py.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+import os
+import time
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -93,9 +95,129 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     base_url = "https://api.deepseek.com"
 
 
-class IBMBobProvider(OpenAICompatibleProvider):
+class IBMBobProvider(LLMProvider):
+    """IBM watsonx.ai (Granite). Not OpenAI-compatible — separate auth flow
+    and wire format, so this does not extend OpenAICompatibleProvider.
+
+    Two steps, not one: `api_key` is an IBM Cloud API key, which must first
+    be exchanged for a short-lived IAM bearer token (~1hr) before it can
+    authorize an actual inference call, and every call also needs a
+    `project_id` (a watsonx project, not a per-request field an API key
+    alone implies). Both quirks are invisible to the rest of the app — it
+    still just sees `complete(request) -> LLMResponse`.
+    """
+
     name = "ibm"
-    base_url = "https://api.ibm.com/v1" # or OpenAI compatible endpoint if available
+
+    #: IBM Cloud's identity service — same for every region/project.
+    _IAM_URL = "https://iam.cloud.ibm.com/identity/token"
+    #: watsonx.ai's chat API is versioned by date, not semver; this is the
+    #: version this integration was written and tested against.
+    _API_VERSION = "2023-05-29"
+
+    def __init__(self, api_key: str, model: str, timeout: float = 20.0):
+        super().__init__(api_key, model, timeout)
+        self.project_id = os.getenv("IBM_PROJECT_ID", "").strip()
+        region = os.getenv("IBM_REGION", "us-south").strip() or "us-south"
+        self.base_url = f"https://{region}.ml.cloud.ibm.com"
+        self._token: Optional[str] = None
+        self._token_expires_at: float = 0.0
+
+    @property
+    def is_configured(self) -> bool:
+        # An API key with no project_id can authenticate but every inference
+        # call will still fail, so treat it the same as unconfigured — the
+        # chain should skip to the next provider rather than burn a request.
+        return bool(self.api_key) and bool(self.project_id)
+
+    async def _get_token(self, client: httpx.AsyncClient) -> str:
+        # 60s safety margin so a token doesn't expire mid-request.
+        if self._token and time.time() < self._token_expires_at - 60:
+            return self._token
+
+        try:
+            resp = await client.post(
+                self._IAM_URL,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+                data={
+                    "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                    "apikey": self.api_key,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise LLMProviderError(self.name, f"IAM token exchange failed: {exc}") from exc
+
+        if resp.status_code != 200:
+            # Never echo the response body here — a bad apikey request can
+            # otherwise get logged verbatim, and the key must never appear
+            # in logs.
+            raise LLMProviderError(
+                self.name, f"IAM token exchange returned HTTP {resp.status_code}", resp.status_code
+            )
+
+        data = resp.json()
+        token = data.get("access_token")
+        if not token:
+            raise LLMProviderError(self.name, "IAM response had no access_token")
+
+        self._token = token
+        self._token_expires_at = time.time() + float(data.get("expires_in", 3600))
+        return token
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        if not self.is_configured:
+            raise LLMProviderError(
+                self.name, "no API key or project_id configured (IBM_BOB_API_KEY / IBM_PROJECT_ID)"
+            )
+
+        payload: Dict[str, Any] = {
+            "model_id": self.model,
+            "project_id": self.project_id,
+            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        if request.json_mode:
+            # Best-effort — if watsonx ignores this, extract_json_object()
+            # downstream already tolerates free-form text with embedded JSON,
+            # the same fallback every other provider relies on.
+            payload["response_format"] = {"type": "json_object"}
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                token = await self._get_token(client)
+                resp = await client.post(
+                    f"{self.base_url}/ml/v1/text/chat",
+                    params={"version": self._API_VERSION},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        except LLMProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            raise LLMProviderError(self.name, f"transport failure: {exc}") from exc
+
+        if resp.status_code != 200:
+            raise LLMProviderError(
+                self.name, f"HTTP {resp.status_code}: {resp.text[:200]}", resp.status_code
+            )
+
+        try:
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError) as exc:
+            raise LLMProviderError(self.name, f"malformed response: {exc}") from exc
+
+        if not text or not text.strip():
+            raise LLMProviderError(self.name, "empty completion")
+
+        return LLMResponse(text=text.strip(), provider=self.name, model=self.model, raw=data)
 
 
 class GrokProvider(OpenAICompatibleProvider):
